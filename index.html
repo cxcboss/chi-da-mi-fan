@@ -1425,7 +1425,7 @@ const Game = (() => {
     if (d > lim) { P.x *= lim / d; P.y *= lim / d; }
     // 只有朝饭堆走才挥勺，站在旁边不会自动吃。
     P.eatTarget = null;
-    if (ctl && P.z <= 0 && P.dashT <= 0 && Math.hypot(cmd.mx, cmd.my) > 0.3 && !cmd.manualFire) {
+    if (ctl && P.z <= 0 && P.dashT <= 0 && Math.hypot(cmd.mx, cmd.my) > 0.3) {
       const R = G.rice, C = CFG.CELL, reach = CFG.SPOON_REACH;
       let best = Infinity;
       for (let j = Math.max(0, Math.floor((P.y - reach - R.oy) / C)); j <= Math.min(R.n - 1, Math.floor((P.y + reach - R.oy) / C)); j++)
