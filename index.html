@@ -3,7 +3,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#2a1c12">
-<meta name="application-version" content="0.11.1">
+<meta name="application-version" content="0.12.0">
 <link rel="manifest" href="./game.webmanifest">
 <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -23,7 +23,7 @@
 <script type="importmap">
 {"imports":{"three":"./vendor/three.module.js","three/addons/":"./vendor/addons/"}}
 </script>
-<div id="stage"><canvas id="gl"></canvas><canvas id="ui" tabindex="0" aria-label="吃大米饭"></canvas><div id="boot">开饭…</div><div id="version" data-build="60befa73" aria-label="版本 0.11.1">v0.11.1</div></div>
+<div id="stage"><canvas id="gl"></canvas><canvas id="ui" tabindex="0" aria-label="吃大米饭"></canvas><div id="boot">开饭…</div><div id="version" data-build="702ac2c5" aria-label="版本 0.12.0">v0.12.0</div></div>
 <script type="module">
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
@@ -359,6 +359,119 @@ class RiceBlur {
     return changed;
   }
 }
+
+// ===== src/hero-art.js =====
+// 主角的蓝眼表情单独预绘，与食物敌人的图集分开；3D 和 HUD 共用同一帧。
+const HeroArt = (() => {
+  const size = 128, columns = 5, rows = 4;
+  const names = Object.freeze(['normal', 'happy', 'angry', 'hurt', 'dizzy', 'tired', 'shock', 'chew', 'eat', 'blink', 'grin', 'shout', 'cry', 'strain', 'puff', 'ko', 'wink', 'derp', 'focus', 'hungry']);
+  let canvas = null;
+  function atlas(makeCanvas) {
+    if (canvas) return canvas;
+    canvas = makeCanvas(columns * size, rows * size);
+    const g = canvas.getContext('2d'), ink = '#253052', mouth = '#793f56';
+    const oval = (x, y, rx, ry, color) => { g.fillStyle = color; g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, TAU); g.fill(); };
+    const line = (points, width = 3, color = ink) => {
+      g.strokeStyle = color; g.lineWidth = width; g.beginPath();
+      points.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.stroke();
+    };
+    const curve = (x, y, happy, width = 4) => {
+      g.strokeStyle = ink; g.lineWidth = width; g.beginPath(); g.moveTo(x - 13, y);
+      g.quadraticCurveTo(x, y + (happy ? -14 : 9), x + 13, y); g.stroke();
+    };
+    const star = (x, y, r, color) => {
+      g.fillStyle = color; g.beginPath();
+      for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4 - Math.PI / 2, d = i % 2 ? r * 0.32 : r; i ? g.lineTo(x + Math.cos(a) * d, y + Math.sin(a) * d) : g.moveTo(x, y - d); }
+      g.closePath(); g.fill();
+    };
+    function eye(x, y, mode, left) {
+      if (mode === 'happy' || mode === 'chew' || mode === 'eat' || mode === 'puff' || mode === 'blink' || mode === 'wink' && !left) {
+        curve(x, y + 4, mode !== 'blink'); return;
+      }
+      if (mode === 'hurt' && left || mode === 'strain' || mode === 'ko') {
+        line([[x - 10, y - 10], [x + 6, y], [x - 10, y + 10]], 4); return;
+      }
+      if (mode === 'dizzy') {
+        const points = []; for (let i = 0; i < 35; i++) { const a = i * 0.4, r = i * 0.34; points.push([x + Math.cos(a) * r, y + Math.sin(a) * r]); }
+        line(points, 3); return;
+      }
+      const tired = mode === 'tired' || mode === 'grin', h = tired ? 11 : mode === 'shock' ? 21 : 19;
+      oval(x, y, 16, h + 1.5, ink); oval(x, y + 1, 13.8, h - 1.2, '#fffdf9');
+      const iris = g.createLinearGradient(0, y - h, 0, y + h);
+      iris.addColorStop(0, '#203b84'); iris.addColorStop(0.5, '#427bc5'); iris.addColorStop(1, '#a4e8ff');
+      g.fillStyle = iris; g.beginPath(); g.ellipse(x + 1, y + 2, mode === 'shock' ? 7 : 10.8, h - 1.5, 0, 0, TAU); g.fill();
+      oval(x + 1, y - 1, 4, h * 0.52, '#1b335f');
+      oval(x - 3.7, y - h * 0.39, 4.3, 5, '#ffffff'); oval(x + 6, y + h * 0.4, 2.3, 2.5, '#e7fbff');
+      g.strokeStyle = ink; g.lineWidth = 4; g.beginPath(); g.moveTo(x - 15, y - h * 0.42);
+      g.quadraticCurveTo(x, y - h - 7, x + 15, y - h * 0.4); g.stroke();
+      line([[x + (left ? -13 : 13), y - h * 0.56], [x + (left ? -19 : 19), y - h * 0.8]], 3);
+      if (mode === 'hungry') star(x, y + 1, 9, '#fff2aa');
+      if (mode === 'cry' || mode === 'hurt' && !left) oval(x + (left ? -10 : 10), y + 19, 4, 8, '#b4e8ff');
+    }
+    names.forEach((mode, frame) => {
+      g.save(); g.translate(frame % columns * size, Math.floor(frame / columns) * size);
+      g.lineJoin = g.lineCap = 'round';
+      for (const x of [18, 110]) {
+        const blush = g.createRadialGradient(x, 80, 1, x, 80, 17);
+        blush.addColorStop(0, 'rgba(255,140,161,0.65)'); blush.addColorStop(1, 'rgba(255,140,161,0)');
+        oval(x, 80, 17, 11, blush);
+      }
+      eye(36, 56, mode, true); eye(92, 56, mode, false);
+      const stern = mode === 'angry' || mode === 'focus' || mode === 'strain';
+      line([[25, stern ? 26 : 25], [45, stern ? 32 : mode === 'cry' ? 21 : 23]], 2.6, '#435c91');
+      line([[83, stern ? 32 : mode === 'cry' ? 21 : 23], [103, stern ? 26 : 25]], 2.6, '#435c91');
+      oval(64, 79, 1.8, 1.1, '#e7b3a7');
+      if (['shock', 'eat', 'shout', 'hungry', 'derp', 'happy'].includes(mode)) {
+        const r = mode === 'shock' ? 7 : mode === 'eat' ? 12 : 10, h = mode === 'shock' ? 10 : 7;
+        oval(64, 96, r, h, mouth); oval(64, 99, r * 0.6, h * 0.4, '#f49aaf');
+      } else if (mode === 'chew' || mode === 'puff') {
+        line([[54, 94], [59, 98], [64, 94], [69, 98], [74, 94]], 2.8, mouth);
+        oval(105, 91, 3.5, 5, '#fff7e7');
+      } else if (mode === 'cry' || mode === 'tired' || mode === 'hurt' || mode === 'angry') {
+        g.strokeStyle = mouth; g.lineWidth = 2.7; g.beginPath(); g.moveTo(57, 98); g.quadraticCurveTo(64, 91, 71, 98); g.stroke();
+      } else {
+        g.strokeStyle = mouth; g.lineWidth = 2.7; g.beginPath(); g.moveTo(56, 94); g.quadraticCurveTo(64, 101, 72, 94); g.stroke();
+      }
+      if (mode === 'grin') line([[59, 96], [70, 99], [76, 92]], 2.6, mouth);
+      g.restore();
+    });
+    return canvas;
+  }
+  function expression(G, P, state) {
+    if (G.over) return G.over.win ? 'happy' : 'ko';
+    if (G.state === 'title' || G.state === 'select') return Math.floor(G.real / 2.2) % 4 === 2 ? 'wink' : G.real % 3.4 < 0.13 ? 'blink' : 'normal';
+    if (P.hurtT > 0) return 'hurt';
+    if (P.burpT > 0) return 'shout';
+    if (state.launched) return G.cat?.state === 'wind' ? 'strain' : 'shock';
+    if (state.rolling) return 'dizzy';
+    if (P.emptyT > 0.4) return 'cry';
+    if (P.slurpT > 0) return 'puff';
+    if (state.eating) return P.spoonT % 0.36 > 0.22 ? 'eat' : 'chew';
+    if (G.state === 'weapon' || P.swapT > 0.24) return 'wink';
+    if (P.charging > 0) return 'focus';
+    if (state.air || P.landT > 0.1 || G.phase === 'boss' && G.t - G.bossAt < 1.1) return 'shock';
+    if (G.phase === 'rest') return 'happy';
+    if (P.hp < P.maxHp * 0.3) return 'tired';
+    if (P.full < 15) return 'hungry';
+    if (P.buffs.clock > 0) return 'grin';
+    if (state.firing) return ['mochi', 'rollpin', 'steamer'].includes(P.weps[P.wi]?.id) ? 'angry' : 'focus';
+    if (P.full > 92) return 'puff';
+    return G.real % 3.4 < 0.13 ? 'blink' : 'normal';
+  }
+  function portrait(g, source, frame, x, y, r) {
+    g.save(); g.translate(x, y); g.scale(r, r);
+    const oval = (x, y, rx, ry, color) => { g.fillStyle = color; g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, TAU); g.fill(); };
+    oval(0, 0, 1, 1, '#3b548f');
+    oval(-0.74, 0.24, 0.3, 0.51, '#4b81ce'); oval(0.74, 0.24, 0.3, 0.51, '#4b81ce');
+    oval(0, 0.12, 0.76, 0.76, '#ffe0c8');
+    g.drawImage(source, frame % columns * size, Math.floor(frame / columns) * size, size, size, -0.72, -0.6, 1.44, 1.44);
+    for (const [x, y, rx, ry] of [[-0.5, -0.54, 0.27, 0.3], [0, -0.65, 0.3, 0.35], [0.5, -0.54, 0.25, 0.3]]) oval(x, y, rx, ry, '#3d5da7');
+    for (let i = 0; i < 7; i++) { const a = Math.PI * (0.15 + i * 0.7 / 6); oval(Math.cos(a) * 0.82, -Math.sin(a) * 0.86, 0.14, 0.14, '#f7f8ff'); }
+    oval(0.69, -0.42, 0.22, 0.12, '#5793df'); oval(0.85, -0.24, 0.12, 0.2, '#5793df'); oval(0.75, -0.31, 0.08, 0.11, '#fff8e8');
+    g.restore();
+  }
+  return { atlas, expression, portrait, names, size, columns, rows };
+})();
 
 // ===== src/settings.js =====
 // Preferences are independent of rendering quality and the simulation clock.
@@ -3298,7 +3411,7 @@ const R3 = (() => {
   const C = CFG.CELL;
   const RICE_H = 24;                 // 米饭最高处 ≈ 角色身高 0.45
   const FOV = 30;
-  let ELEV = 48 * Math.PI / 180;     // 横屏 48°，竖屏 55°（比 v0.5 低一点，能看到角色的脸）
+  let ELEV = 42 * Math.PI / 180;     // 横屏 42°，竖屏 48°，保持固定斜俯视。
   let renderer, scene, camera, W = 1, H = 1, D = 1000;
   const camTarget = new THREE.Vector3(), camShake = new THREE.Vector3();
   const viewFrustum = new THREE.Frustum(), shadowFrustum = new THREE.Frustum(), viewSphere = new THREE.Sphere(), viewMatrix = new THREE.Matrix4();
@@ -3492,12 +3605,12 @@ const R3 = (() => {
     return { geos: parts.map(l => merge(l, true)), ol: merge(outl, false), face: faces.length ? mergeFace(faces) : null };
   }
   // 普通（非实例化）版本：返回一个 Group；有脸的话可以用 setFace 换表情
-  function bakeGroup(root, fade, outlineScale = 1) {
+  function bakeGroup(root, fade, outlineScale = 1, heroFace = false) {
     const b = bake(root, outlineScale), g = new THREE.Group(), mats = fade ? MAT.clsF : MAT.cls;
     b.geos.forEach((geo, k) => { if (geo) { const m = new THREE.Mesh(geo, mats[k]); m.castShadow = k !== 3; m.matrixAutoUpdate = false; g.add(m); } });
     if (b.ol) g.add(new THREE.Mesh(b.ol, fade ? MAT.outlineF : MAT.outline));
     if (b.face) {
-      const tex = MAT.faceTex.clone(); tex.repeat.set(1 / FC, 1 / FR); tex.needsUpdate = true;
+      const tex = (heroFace ? MAT.heroFaceTex : MAT.faceTex).clone(); tex.repeat.set(1 / FC, 1 / FR); tex.needsUpdate = true;
       const fm = new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.35, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
       const m = new THREE.Mesh(b.face, fm); m.renderOrder = 2; g.add(m);
       g.userData.faceTex = tex; g.userData.faceI = -1; setFace(g, 0);
@@ -3638,6 +3751,21 @@ const R3 = (() => {
     const pg = new THREE.SphereGeometry(1, 18, 12), pp = pg.attributes.position;
     for (let i = 0; i < pp.count; i++) { const x = pp.getX(i), y = pp.getY(i), z = pp.getZ(i), k = 1 + 0.12 * Math.sin(x * 4 + 1) * Math.sin(z * 3 + 2) + 0.08 * Math.sin(y * 5 + x * 2); pp.setXYZ(i, x * k, y * k, z * k); }
     pg.computeVertexNormals(); GEO.potato = pg;
+    GEO.heroSkirt = new THREE.CylinderGeometry(0.58, 1, 1, 24, 3);
+    const skirt = GEO.heroSkirt.attributes.position;
+    for (let i = 0; i < skirt.count; i++) {
+      const x = skirt.getX(i), y = skirt.getY(i), z = skirt.getZ(i), fold = 1 + 0.055 * Math.cos(Math.atan2(z, x) * 8) * (0.5 - y);
+      skirt.setXYZ(i, x * fold, y, z * fold);
+    }
+    GEO.heroSkirt.computeVertexNormals();
+    GEO.heroCurl = new THREE.TorusGeometry(1, 0.09, 5, 18, Math.PI * 1.35);
+    const frill = new THREE.Shape();
+    frill.moveTo(-0.76, 0); frill.lineTo(-1.08, 0.9);
+    frill.bezierCurveTo(-1.2, 1.3, -0.65, 1.42, -0.4, 1.17);
+    frill.bezierCurveTo(-0.2, 1.6, 0.2, 1.6, 0.4, 1.17);
+    frill.bezierCurveTo(0.65, 1.42, 1.2, 1.3, 1.08, 0.9);
+    frill.lineTo(0.76, 0); frill.closePath();
+    GEO.heroFrill = new THREE.ExtrudeGeometry(frill, { depth: 0.16, bevelEnabled: false, curveSegments: 4 });
   }
   // 表情贴花：一块微微弯曲的面片（贴在圆脸上），bend = 边缘往后弯多少
   function faceGeo(bend) {
@@ -3751,6 +3879,7 @@ const R3 = (() => {
     };
     MAT.projectile = MAT.cls.map(projectileMaterial); MAT.projectileOutline = projectileMaterial(MAT.outline);
     MAT.faceTex = faceAtlas();
+    MAT.heroFaceTex = canvasTex(HeroArt.atlas(mkCanvas));
     MAT.faceInst = new THREE.MeshBasicMaterial({ map: MAT.faceTex, transparent: true, alphaTest: 0.35, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     MAT.faceInst.onBeforeCompile = sh => {
       sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float aFace;')
@@ -3761,6 +3890,7 @@ const R3 = (() => {
     // 调色板（零件颜色 + 材质类别）
     Object.assign(PAL, {
       skin: pal('#ffd3ae'), hair: pal('#4a2a16'), cloth: pal('#ff7a2e'), apron: pal('#fff6e6'), boot: pal('#6a3a1e'), sole: pal('#3a2010'),
+      heroSkin: pal('#ffe0c8'), heroHair: pal('#3656a2'), heroHairHi: pal('#638fda'), heroNavy: pal('#273c71'), heroBlue: pal('#568ddd'), heroWhite: pal('#f5f5ff'), heroGold: pal('#e0bf78', 2),
       eye: pal('#150c08', 1), eyeHi: pal('#ffffff', 3), cheek: pal('#ff8f86'), mouth: pal('#7d2020'), tongue: pal('#ff6b6b'),
       wood: pal('#c08040', 0, 1), woodLight: pal('#e2b47a', 0, 1), woodDark: pal('#7a4a22', 0, 1), lacquer: pal('#e0362a', 1, 3), lacquerIn: pal('#2a1410', 1), gold: pal('#ffc93a', 2, 2),
       rice: pal('#ffffff', 4), riceGold: pal('#ffd56a', 4), nori: pal('#22322a', 1), noriEdge: pal('#3a5040', 1), ume: pal('#d0263a', 1), gem: pal('#ff3b5c', 1),
@@ -4211,59 +4341,115 @@ const R3 = (() => {
   // 小短脚：所有会走路的食物都有一双圆圆的小脚，走起路来一摇一摆
   function feet(b, x, y, z, s, p) { for (const side of [-1, 1]) b.add(mk(GEO.sphereMid, p || PAL.boot, side * x, y, z, 3.6 * s, 2.4 * s, 4.6 * s, 0.4)); }
   function nubs(b, x, y, z, s, p) { for (const side of [-1, 1]) b.add(mk(GEO.sphereMid, p, side * x, y, z, 3.2 * s, 3.2 * s, 3.2 * s, 0.4)); }
-  // ---- 主角：头戴红漆饭碗的小厨师 ----
+  // ---- 蓝发小饭友：短双马尾、白色头饰、蓝色蝴蝶结和鲸鱼小包 ----
   let player;
   function buildPlayer() {
     const root = grp(), body = grp(); body.position.y = 22; root.add(body);
+    root.userData.character = 'blue-rice-girl';
     const inner = grp(); inner.position.y = -22; body.add(inner);
+    const model = b => bakeGroup(b, false, 0.48);
+    function bow(b, x, y, z, scale = 1) {
+      for (const side of [-1, 1]) {
+        const loop = mk(GEO.sphereMid, PAL.heroBlue, x + side * 2.8 * scale, y, z, 3.4 * scale, 2.3 * scale, 1.3 * scale, 0.08);
+        loop.rotation.z = side * 0.3; b.add(loop);
+      }
+      b.add(mk(GEO.grain, PAL.heroWhite, x, y, z + 1.2 * scale, 0.65 * scale, 0.65 * scale, 0.65 * scale, 0.06));
+    }
     const legs = [-1, 1].map(side => {
-      const b = grp(); b.add(mk(GEO.capsule, PAL.boot, 0, -4.2, 0.8, 3.4, 2.3, 3.8, 0.5)); b.add(mk(GEO.cyl, PAL.sole, 0, -7.6, 1.2, 3.5, 1.1, 4.1));
-      const l = bakeGroup(b); l.position.set(side * 4.8, 9, 0); inner.add(l); return l;
+      const b = grp();
+      b.add(mk(GEO.cyl, PAL.heroWhite, 0, -0.5, 0, 2.9, 8, 2.9, 0.06));
+      b.add(mk(GEO.capsule, PAL.heroNavy, 0, -4.2, 1.2, 3.6, 2.2, 4.1, 0.08));
+      b.add(mk(GEO.cyl, PAL.heroBlue, 0, -7.6, 1.6, 3.7, 1.1, 4.3));
+      bow(b, 0, -2.4, 4.5, 0.48);
+      const leg = model(b); leg.position.set(side * 5.4, 9, 0); inner.add(leg); return leg;
     });
     const tb = grp();
-    tb.add(mk(GEO.sphereHi, PAL.cloth, 0, 0, 0, 10.5, 9.8, 9.6, 0.09));
-    tb.add(mk(GEO.sphere, PAL.apron, 0, -0.6, 4.6, 7.2, 7.4, 5.2));
-    tb.add(mk(GEO.rbox, PAL.apron, 0, 5.2, 7.6, 5, 1.2, 1.2));
-    tb.add(mk(GEO.sphereLo, PAL.lacquer, 0, 1, 9.6, 1.5));
-    const torso = bakeGroup(tb); torso.position.y = 15; inner.add(torso);
+    tb.add(mk(GEO.sphereHi, PAL.heroNavy, 0, 2, 0, 11.8, 9, 10.5, 0.07));
+    tb.add(mk(GEO.heroSkirt, PAL.heroNavy, 0, -3, 0, 16.4, 10, 13.3, 0.06));
+    const hem = mk(GEO.torus, PAL.heroWhite, 0, -8, 0, 16.2, 13.2, 11); hem.rotation.x = Math.PI / 2; tb.add(hem);
+    tb.add(mk(GEO.sphereMid, PAL.heroWhite, 0, -0.3, 9.2, 9, 8.3, 2.1, 0.05));
+    tb.add(mk(GEO.rbox, PAL.heroWhite, 0, -0.8, 11.5, 8.8, 5, 1.1, 0.04));
+    for (const side of [-1, 1]) {
+      const collar = mk(GEO.rbox, PAL.heroWhite, side * 3.4, 8.5, 7, 5.8, 3.4, 1.2); collar.rotation.z = side * 0.33; tb.add(collar);
+      tb.add(mk(GEO.sphereLo, PAL.heroGold, side * 6.3, 4.4, 9.8, 0.9));
+      const wave = mk(GEO.sphereLo, PAL.heroBlue, side * 1.2, -1.1 + side * 0.5, 12.2, 1.9, 0.6, 0.35); wave.rotation.z = side * 0.4; tb.add(wave);
+    }
+    bow(tb, 0, 6.8, 10, 0.68);
+    const torso = model(tb); torso.position.y = 15; inner.add(torso);
     const arms = [-1, 1].map(side => {
-      const piv = grp(); piv.position.set(side * 9.6, 19.5, 0); inner.add(piv);
-      const b = grp(); b.add(mk(GEO.capsule, PAL.cloth, side * 1.5, -3.5, 0, 2.9, 2.6, 2.9, 0.4)); b.add(mk(GEO.sphere, PAL.skin, side * 2, -7.6, 1, 3.1, 3.1, 3.1, 0.4));
-      piv.add(bakeGroup(b)); return piv;
+      const pivot = grp(); pivot.position.set(side * 12, 20.5, 0); inner.add(pivot);
+      const b = grp();
+      b.add(mk(GEO.sphereMid, PAL.heroWhite, side, -2.6, 0, 4, 5.1, 3.8, 0.06));
+      b.add(mk(GEO.cyl, PAL.heroBlue, side * 1.5, -6.3, 0, 3, 1.4, 3));
+      b.add(mk(GEO.sphereMid, PAL.heroSkin, side * 1.6, -8, 1, 3.2, 3.1, 3.1, 0.05));
+      pivot.add(model(b));
+      const fingers = grp();
+      for (const direction of [-1, 1]) {
+        const finger = mk(GEO.capsule, PAL.heroSkin, direction * 0.9, -2.4, 1, 0.55, 0.9, 0.55); finger.rotation.z = direction * 0.25; fingers.add(finger);
+      }
+      const peace = model(fingers); peace.position.set(side * 1.6, -8, 1); peace.visible = false; pivot.add(peace); pivot.userData.peace = peace;
+      return pivot;
     });
     const hb = grp();
-    hb.add(mk(GEO.sphereHi, PAL.skin, 0, 0, 0, 13.2, 12.2, 12.2, 0.07));
-    const hair = mk(new THREE.SphereGeometry(1, 28, 14, 0, TAU, 0, Math.PI * 0.55), PAL.hair, 0, 1.6, -1.4, 14, 11.6, 13, 0.06); hb.add(hair);
-    for (const [x, y, z, r] of [[-6.5, 4.6, 9.6, 4], [0, 5.8, 10.8, 4.4], [6.5, 4.6, 9.6, 4]]) hb.add(mk(GEO.sphere, PAL.hair, x, y, z, r, r * 0.8, r * 0.72, 0.3));
-    const bowl = mk(GEO.bowl, PAL.lacquer, 0, 15.4, -1, 13.6, 9.5, 13.6, 0.12); bowl.rotation.x = Math.PI; hb.add(bowl);
-    const rimG = mk(new THREE.TorusGeometry(1, 0.06, 6, 40), PAL.gold, 0, 6.6, -1, 13.7, 13.7, 13.7); rimG.rotation.x = Math.PI / 2; hb.add(rimG);
-    hb.add(mk(GEO.cyl, PAL.cream, 0, 16.2, -1, 5.4, 1.8, 5.4, 0.3));
-    const band = mk(new THREE.TorusGeometry(1, 0.05, 6, 40), PAL.cream, 0, 10.4, -1, 12.9, 12.9, 12.9); band.rotation.x = Math.PI / 2; hb.add(band);
-    face(hb, 0, -1.6, 11.4, 21, 16.5, 3.2);
-    const head = bakeGroup(hb); head.position.y = 34; inner.add(head);
-    const mouth = grp();
-    mouth.add(mk(GEO.sphereMid, PAL.mouth, 0, 0, 0, 5.8, 5.2, 1.5));
-    mouth.add(mk(GEO.sphereLo, PAL.tongue, 0, -2.3, 1.4, 3.4, 1.4, 0.4));
-    const eatingMouth = bakeGroup(mouth); eatingMouth.position.set(0, -4, 13); head.add(eatingMouth); eatingMouth.visible = false;
-    // 呆毛：碗底长出一粒米
-    const sb = grp(); sb.add(mk(GEO.cyl, PAL.leaf, 0, 2, 0, 0.6, 4, 0.6)); const gt = mk(GEO.capsule, PAL.rice, 1.5, 6.5, 0, 2.2, 2.6, 2.2, 0.4); gt.rotation.z = -0.5; sb.add(gt);
-    const sprout = bakeGroup(sb); sprout.position.set(0.9, 17, -1); head.add(sprout);
-    // Held models are built when first selected, then retained for later swaps.
+    hb.add(mk(GEO.sphereHi, PAL.heroSkin, 0, 0, 0, 16.4, 14.5, 14.4, 0.04));
+    for (const side of [-1, 1]) {
+      hb.add(mk(GEO.sphereMid, PAL.heroSkin, side * 15.7, -1, 1, 3.2, 4.1, 2.7));
+      hb.add(mk(GEO.sphereMid, PAL.heroSkin, side * 10.7, -4.6, 8.9, 5.7, 4.7, 4.6));
+    }
+    hb.add(mk(GEO.sphereMid, PAL.heroHair, 0, 1, -6.2, 16, 13.8, 9.3, 0.045));
+    const cap = new THREE.SphereGeometry(1, 28, 14, 0, TAU, 0, Math.PI * 0.44);
+    hb.add(mk(cap, PAL.heroHair, 0, 2, -1.2, 17, 14, 15.7, 0.04));
+    for (const [x, y, sx, sy, rz] of [[-9.5, 7.7, 5.1, 6.2, -0.34], [-2.8, 9.2, 5.6, 6.3, -0.32], [5.5, 9.4, 5.6, 5.7, 0.48], [13.4, 3.7, 3.5, 6.6, 0.22], [-13.4, 3.7, 3.5, 6.6, -0.2]]) {
+      const lock = mk(GEO.sphereMid, PAL.heroHair, x, y, 10.9, sx, sy, 3.5, 0.035); lock.rotation.z = rz; hb.add(lock);
+    }
+    for (let i = 0; i < 9; i++) {
+      const a = i / 8 * Math.PI, x = Math.cos(a) * 17, y = 6 + Math.sin(a) * 12;
+      hb.add(mk(GEO.sphereLo, PAL.heroNavy, x, y - 0.4, 2.6, 3.3, 1.7, 1));
+      const pleat = mk(GEO.heroFrill, PAL.heroWhite, x, y, 3.1, 3.2, 2.8, 2, 0.01);
+      pleat.rotation.z = a - Math.PI / 2; hb.add(pleat);
+    }
+    face(hb, 0, -0.4, 14.9, 27, 21.5, 2.5);
+    const head = bakeGroup(hb, false, 0.45, true); head.position.y = 37; inner.add(head);
+    cap.dispose();
+    const pigtails = [-1, 1].map(side => {
+      const pivot = grp(); pivot.position.set(side * 16.8, 0.6, -4); head.add(pivot);
+      const b = grp();
+      for (const [x, y, sx, sy, rz] of [[3, -5.5, 6.8, 8.2, 0.35], [4.2, -12.4, 5.4, 6.2, -0.32], [0.2, -14.1, 4.7, 4.1, -0.65]]) {
+        const lock = mk(GEO.sphereMid, PAL.heroHair, side * x, y, 0, sx, sy, 5.1, 0.04); lock.rotation.z = side * rz; b.add(lock);
+      }
+      const tip = mk(GEO.sphereMid, PAL.heroHairHi, side * 3.6, -15.2, 2, 4.8, 3.6, 3.6, 0.025); tip.rotation.z = -side * 0.35; b.add(tip);
+      pivot.add(model(b)); return pivot;
+    });
+    const ribbons = [-1, 1].map(side => {
+      const b = grp(); bow(b, 0, 0, 0, 0.85);
+      const ribbon = model(b); ribbon.position.set(side * 17.5, 4.5, 7); ribbon.rotation.z = side * 0.35; head.add(ribbon); return ribbon;
+    });
+    const sb = grp(); const curl = mk(GEO.heroCurl, PAL.heroHair, 0, 0, 0, 4.4, 4.4, 4.4, 0.04); curl.rotation.z = -0.8; sb.add(curl);
+    const sprout = model(sb); sprout.position.set(1, 16.3, -3); head.add(sprout);
+    const pb = grp();
+    pb.add(mk(GEO.sphereMid, PAL.heroBlue, 0, 0, 0, 5.1, 4, 3.3, 0.04));
+    pb.add(mk(GEO.sphereMid, PAL.heroWhite, 0, -1.9, 1.2, 4.4, 1.6, 2.4));
+    for (const side of [-1, 1]) {
+      pb.add(mk(GEO.sphereLo, PAL.heroNavy, side * 1.8, 0.6, 3, 0.45));
+      const tail = mk(GEO.sphereLo, PAL.heroBlue, 5.5, 2 + side * 1.2, 0, 2.6, 1.2, 1.3); tail.rotation.z = side * 0.6; pb.add(tail);
+    }
+    pb.add(mk(GEO.rbox, PAL.heroGold, 0, 4.6, 0, 1, 3, 1));
+    const pouch = model(pb); pouch.position.set(14, 11.5, 1); inner.add(pouch);
+    // 保留独立武器和挥勺节点，不改变游戏的枪口/碰撞数据。
     const hand = grp(); hand.position.set(6.2, 15, 9); inner.add(hand);
     const spoon = grp(), spoonBody = grp();
     spoonBody.add(mk(GEO.rbox, PAL.woodLight, 0, 0, -12, 2.5, 2, 25));
     spoonBody.add(mk(GEO.sphereMid, PAL.steel, 0, 0, 5, 8, 2.6, 10));
     spoonBody.add(mk(GEO.sphereMid, PAL.cream, 0, 1.7, 5, 6.5, 1, 8));
-    spoon.add(bakeGroup(spoonBody));
+    spoon.add(model(spoonBody));
     const spoonRice = grp();
-    for (let i = 0; i < 5; i++) { const g = mk(GEO.grain, PAL.rice, (i % 3 - 1) * 3, 3 + i % 2, 3 + (i % 2) * 4, 0.8); g.rotation.set(1.3, i, 0.3); spoonRice.add(g); }
-    const spoonLoad = bakeGroup(spoonRice); spoon.add(spoonLoad); spoon.visible = false; root.add(spoon);
-    const guns = {};
-    const flash = new THREE.Mesh(GEO.star, MAT.glowC); flash.visible = false; flash.renderOrder = 6; hand.add(flash);
+    for (let i = 0; i < 5; i++) { const grain = mk(GEO.grain, PAL.rice, (i % 3 - 1) * 3, 3 + i % 2, 3 + (i % 2) * 4, 0.8); grain.rotation.set(1.3, i, 0.3); spoonRice.add(grain); }
+    const spoonLoad = model(spoonRice); spoon.add(spoonLoad); spoon.visible = false; root.add(spoon);
+    const eatingMouth = grp(); eatingMouth.visible = false; head.add(eatingMouth);
+    const guns = {}, flash = new THREE.Mesh(GEO.star, MAT.glowC); flash.visible = false; flash.renderOrder = 6; hand.add(flash);
     const shield = new THREE.Mesh(GEO.sphere, MAT.shield); shield.scale.setScalar(34); shield.position.y = 22; root.add(shield);
-    scene.add(root);
-    root.scale.setScalar(1.13);
-    return { root, body, inner, legs, arms, torso, head, eatingMouth, sprout, hand, spoon, spoonLoad, guns, flash, shield, blink: 2, cur: null, swap: 0, faceT: 0, lastHp: 100 };
+    scene.add(root); root.scale.setScalar(1.13);
+    return { root, body, inner, legs, arms, torso, head, eatingMouth, sprout, pigtails, ribbons, pouch, hand, spoon, spoonLoad, guns, flash, shield, headYaw: 0, faceT: 0, cur: null, swap: 0 };
   }
   // ---- 食物怪（可爱笨拙：圆滚滚、小短脚、表情丰富）----
   function bOnigiri(scale, opt) {
@@ -5120,7 +5306,7 @@ const R3 = (() => {
     player = buildPlayer(); player.flash.material = flashMat;
     installShadowCache();
   }
-  // 视野：横屏约 780 宽、竖屏约 440 宽；俯角横屏 52°、竖屏 58°
+  // 视野按原来的水平范围设置，地面覆盖由实际新镜头反投影计算。
   function resize(w, h) {
     W = w; H = h; basePatch = null;
     const nextDpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -5128,7 +5314,7 @@ const R3 = (() => {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     const portrait = h > w * 1.1;
-    ELEV = (portrait ? 55 : 48) * Math.PI / 180;
+    ELEV = (portrait ? 48 : 42) * Math.PI / 180; camera.userData.elevation = ELEV;
     const tanH = Math.tan(FOV * Math.PI / 360);
     D = clamp((portrait ? 440 : 780) / (2 * tanH * camera.aspect), 700, 3000);
     camera.updateProjectionMatrix();
@@ -5191,26 +5377,12 @@ const R3 = (() => {
     s3.setScalar(r * clamp(k, 0.02, 1)); v3.y = gh + 2.6; m4.compose(v3, q4, s3); pools.warnFill.setMatrixAt(warnN, m4); warnN++;
   }
   const blinkOf = (t, seed, f) => ((t + seed * 7.3) % 3.4) < 0.13 ? FACE.blink : f;
-  function playerFace(G, P, st) {
-    const t = G.real;
-    if (G.over && !G.over.win) return FACE.ko;
-    if (G.over && G.over.win) return FACE.happy;
-    if (G.state === 'title' || G.state === 'select') { const k = Math.floor(t / 2.2) % 4; return [FACE.happy, FACE.normal, FACE.wink, FACE.normal][k] === FACE.normal ? blinkOf(t, 0, FACE.normal) : [FACE.happy, FACE.normal, FACE.wink, FACE.normal][k]; }
-    if (P.hurtT > 0) return FACE.hurt;
-    if (P.burpT > 0) return FACE.shout;
-    if (st.launched) return G.phase === 'drop' ? (P.z > 200 ? FACE.shock : FACE.happy) : (catapult?.state === 'wind' ? FACE.focus : FACE.shock);
-    if (st.rolling) return FACE.hurt;
-    if (st.eating) return (t * 7) % 1 < 0.5 ? FACE.eat : FACE.chew;
-    if (P.charging > 0) return FACE.focus;
-    if (st.air) return FACE.happy;
-    if (P.landT > 0.1) return FACE.shock;
-    if (G.phase === 'rest') return FACE.happy;
-    if (P.emptyT > 0.4) return FACE.cry;
-    if (P.hp < P.maxHp * 0.3) return blinkOf(t, 0, FACE.tired);
-    if (P.full < 15) return blinkOf(t, 0, FACE.hungry);
-    if (st.firing) return FACE.focus;
-    if (P.full >= 100) return blinkOf(t, 0, FACE.puff);
-    return blinkOf(t, 0, FACE.normal);
+  function playerFace(G, P, state) { return FACE[HeroArt.expression(G, P, state)]; }
+  const portraitState = { image: null, frame: 0 };
+  function portrait() {
+    portraitState.image = HeroArt.atlas(mkCanvas);
+    portraitState.frame = clamp(player?.head.userData.faceI ?? FACE.normal, 0, FC * FR - 1);
+    return portraitState;
   }
   function syncPlayer(dt) {
     const G = Game, P = G.p, pr = player, t = G.real;
@@ -5220,13 +5392,14 @@ const R3 = (() => {
     const sp = Math.hypot(P.vx, P.vy), moving = sp > 30 && !air;
     const eating = !rolling && !air && (P.chew > 0 || P.blocked >= 0);
     const dead = G.over && !G.over.win, won = G.over && G.over.win;
+    const celebrating = won || G.phase === 'rest' && G.restT < 2.4 && !moving && !air && !launched;
     pr.fireT = Math.max(0, (pr.fireT || 0) - dt); if (P.muzzle > 0) pr.fireT = 0.35;
     let yaw = Math.atan2(Math.cos(P.aimA), Math.sin(P.aimA));
     if (rolling) yaw = Math.atan2(P.dx, P.dy);
     pr.root.rotation.y = lerpAngle(pr.root.rotation.y, yaw, 1 - Math.exp(-dt * (rolling ? 40 : 25)));
     const f = P.full / 100;
-    pr.torso.scale.set(1 + 0.5 * f, 1 + 0.22 * f, 1 + 0.5 * f);
-    let bRx = 0, bRz = 0, sx = 1, sy = 1, by = 22, hRx = 0, hRz = 0, aL = 0, aR = -0.9, aLz = 0, aRz = 0, lL = 0, lR = 0, bx = 0;
+    pr.torso.scale.set(1 + 0.24 * f, 1 + 0.12 * f, 1 + 0.24 * f);
+    let bRx = 0, bRz = 0, sx = 1, sy = 1, by = 22, hRx = -0.1, hRz = 0, aL = 0, aR = -0.9, aLz = 0, aRz = 0, lL = 0, lR = 0, bx = 0;
     if (moving) {
       lL = Math.sin(P.walkT) * 0.8; lR = -lL; aL = -Math.sin(P.walkT) * 0.7; by += Math.abs(Math.sin(P.walkT)) * 3.2;
       sx += Math.sin(P.walkT * 2) * 0.05; bRz = Math.sin(P.walkT) * 0.06;
@@ -5239,7 +5412,7 @@ const R3 = (() => {
     if (rolling) { const k = 1 - P.dashT / P.dashDur; bRx = k * TAU; sx = sy = 0.86; lL = lR = -1.5; aL = -1.3; aR = -1.3; hRx = 0.4; }
     if (eating && !rolling) {
       const bite = P.eatKick || 0, chomp = Math.sin(t * 28);
-      hRx = 0.38 + chomp * 0.3 + bite * 0.2; bRx = 0.15 + bite * 0.18;
+      hRx = -0.15 + chomp * 0.1 - bite * 0.08; bRx = 0.06 + bite * 0.12;
       sx += 0.12 + bite * 0.14; sy -= bite * 0.13; by -= bite * 3;
       aL = -1.65 + chomp * 0.5; aLz = -0.25; lL = -chomp * 0.25; lR = chomp * 0.25;
       bRz = Math.sin(t * 14) * 0.12;
@@ -5248,39 +5421,61 @@ const R3 = (() => {
     if (P.burpT > 0) { sx += P.burpT * 0.6; sy -= P.burpT * 0.3; hRx = -0.45 * P.burpT / 0.6; aL = -2.2; aLz = -0.6; }
     if (P.slurpT > 0) {
       const k = P.slurpT; sx += Math.sin(k * Math.PI) * 0.22; hRx -= Math.sin(k * Math.PI) * 0.15;
-      if (k < 0.5) { aL = -0.8 + Math.sin(k * 30) * 0.18; aLz = -0.8; }
+      if (k < 0.65) { aL = -1.05 + Math.sin(k * 30) * 0.13; aLz = -0.9; hRx = -0.2; }
     }
     if (launched) {
       const spin = G.phase === 'launch' && catapult?.state === 'fling';
       if (spin || (G.phase === 'drop' && P.z > 60)) { bRx = spin ? t * 9 : Math.sin(t * 3) * 0.3; aL = Math.sin(t * 28) * 2; aR = Math.cos(t * 28) * 2; lL = Math.sin(t * 24) * 1.1; lR = -lL; }
       else if (catapult?.state === 'wind') { sy = 0.82; sx = 1.12; }
     }
-    if (G.phase === 'rest' && !moving && !air && !launched) { const d = Math.sin(t * 6.5); bRz = d * 0.14; aL = -2.4 + d * 0.6; aR = -2.4 - d * 0.6; by += Math.abs(d) * 3; }
-    if (P.full < 15 && !menu && !air) { hRx += 0.16; by -= 1; if (Math.sin(t * 1.3) > 0.94) bx = Math.sin(t * 70) * 0.8; }
+    if (celebrating) { const d = Math.sin(t * 6.5); bRz = d * 0.12; aL = -2.6 + d * 0.25; aR = -2.6 - d * 0.25; aLz = -0.3; aRz = 0.3; by += Math.abs(d) * 5; hRx = -0.2; }
+    if (P.full < 15 && !menu && !air) { hRx += 0.06; by -= 1; if (Math.sin(t * 1.3) > 0.94) bx = Math.sin(t * 70) * 0.8; }
     if (P.charging > 0) bx = Math.sin(t * 90) * P.charging * 0.9;
     if (dead) { pr.deadK = Math.min(1, (pr.deadK || 0) + dt * 4); bRx = -1.45 * pr.deadK; by = 14; aL = aR = -2.8; } else pr.deadK = 0;
     if (won) { by += Math.abs(Math.sin(t * 8)) * 10; aL = aR = -2.6; aLz = -0.5; aRz = 0.5; }
     if (menu) { aR = -0.9 + Math.sin(t * 2) * 0.1; if (Math.floor(t / 2.2) % 4 === 2) { aL = -2.6 + Math.sin(t * 10) * 0.4; } }
+    if (!moving && !air && !eating && !dead && !celebrating && !P.charging && pr.fireT <= 0) {
+      if (t % 9 > 6.8) { aL = -2.6 + Math.sin(t * 10) * 0.2; aLz = -0.25; hRz += Math.sin(t * 2) * 0.1; }
+      if (P.emptyT > 0.4) { aL = -0.7; aLz = -0.45; by -= 1.5; hRx = 0.02; }
+    }
+    if (G.state === 'weapon' || P.swapT > 0.24) { aL = -2.1; aLz = -0.35; hRx = -0.2; }
+    const cameraYaw = Math.atan2(camera.position.x - P.x, camera.position.z - P.y);
+    const towardCamera = clamp(angDiff(pr.root.rotation.y, cameraYaw), -0.85, 0.85);
+    const expressive = menu || eating || P.slurpT > 0 || G.phase === 'rest' || won || G.state === 'weapon';
+    let headTarget = towardCamera * (expressive ? 0.85 : 0.22);
+    if (eating) headTarget += clamp(angDiff(pr.root.rotation.y, Math.atan2(Math.cos(P.biteA), Math.sin(P.biteA))), -0.85, 0.85) * 0.25;
+    pr.headYaw = lerp(pr.headYaw, clamp(headTarget, -0.9, 0.9), 1 - Math.exp(-dt * 12));
+    pr.torso.rotation.y = towardCamera * (expressive ? 0.12 : 0.04);
     pr.body.rotation.set(bRx, 0, bRz); pr.body.scale.set(sx, sy, sx); pr.body.position.set(bx, by, 0);
-    pr.head.rotation.set(hRx, 0, hRz);
+    pr.head.rotation.set(hRx, pr.headYaw, hRz);
     if (P.slurpT > 0) pr.head.scale.set(1 + Math.sin(P.slurpT * Math.PI) * 0.18, 1, 1 + Math.sin(P.slurpT * Math.PI) * 0.12); else pr.head.scale.setScalar(1);
-    pr.eatingMouth.visible = eating && !dead && P.hurtT <= 0;
-    if (pr.eatingMouth.visible) { const q = 0.55 + (P.eatKick || 0) * 0.85; pr.eatingMouth.scale.set(1.1 + q * 0.15, q, 1); pr.head.rotation.y = angDiff(P.aimA, P.biteA) * -0.45; }
+    // 张嘴和鼓腮使用同一表情帧，避免额外嘴部盖住眼睛。
+    pr.eatingMouth.visible = false;
     const k = 1 - Math.exp(-dt * 18);
     pr.arms[0].rotation.x = lerp(pr.arms[0].rotation.x, aL, rolling || launched ? 1 : k); pr.arms[0].rotation.z = lerp(pr.arms[0].rotation.z, aLz, k);
     pr.arms[1].rotation.x = lerp(pr.arms[1].rotation.x, aR, rolling || launched ? 1 : k); pr.arms[1].rotation.z = lerp(pr.arms[1].rotation.z, aRz, k);
-    pr.arms.forEach((a, i) => { a.position.x = (i ? 1 : -1) * (9.6 + 4.2 * f); });
+    pr.arms.forEach((a, i) => { a.position.x = (i ? 1 : -1) * (12 + 2.2 * f); a.userData.peace.visible = !!celebrating; });
     pr.spoon.visible = !!P.eatTarget && !rolling && !air && !launched && !dead;
     if (pr.spoon.visible) {
       const phase = P.spoonT % 0.36 / 0.36, reach = Math.sin(phase * Math.PI), yaw = pr.root.rotation.y;
       const dx = (P.eatTarget.x - P.x) / 1.13, dz = (P.eatTarget.y - P.y) / 1.13;
       const lx = Math.cos(yaw) * dx - Math.sin(yaw) * dz, lz = Math.sin(yaw) * dx + Math.cos(yaw) * dz;
       const scoopH = groundH(P.eatTarget.x, P.eatTarget.y) / 1.13 + 4;
-      pr.spoon.position.set(lerp(-3, lx, reach), lerp(30, scoopH, reach) + Math.sin(phase * TAU) * 5, lerp(17, lz, reach));
+      pr.spoon.position.set(lerp(-3, lx, reach), lerp(34, scoopH, reach) + Math.sin(phase * TAU) * 5, lerp(17, lz, reach));
       pr.spoon.rotation.set(-0.2 + Math.cos(phase * TAU) * 0.22, Math.atan2(lx, lz), -0.18);
       pr.spoonLoad.visible = phase > 0.5; pr.arms[0].rotation.x = -1.2 - reach * 0.8;
     }
     pr.legs[0].rotation.x = lL; pr.legs[1].rotation.x = lR;
+    const forward = Math.sin(pr.root.rotation.y) * P.vx + Math.cos(pr.root.rotation.y) * P.vy;
+    const sideSpeed = Math.cos(pr.root.rotation.y) * P.vx - Math.sin(pr.root.rotation.y) * P.vy;
+    pr.pigtails.forEach((hair, i) => {
+      const side = i ? 1 : -1, pitch = clamp(-forward * 0.0008 + (air ? 0.25 : 0) + Math.sin(P.walkT) * (moving ? 0.08 : 0.02) - (P.eatKick || 0) * 0.13, -0.4, 0.4);
+      hair.rotation.x = lerp(hair.rotation.x, pitch, k);
+      hair.rotation.z = lerp(hair.rotation.z, side * (0.08 + Math.sin(t * 3 + i) * 0.025 + (P.eatKick || 0) * 0.12) + sideSpeed * 0.0007, k);
+      pr.ribbons[i].rotation.z = side * 0.35 + hair.rotation.z * 0.35;
+    });
+    pr.pouch.position.set(14 + f * 2.2, 11.5 + Math.abs(Math.sin(P.walkT)) * (moving ? 1.2 : 0.15), 1);
+    pr.pouch.rotation.z = Math.sin(t * 3) * 0.04 + sideSpeed * 0.0006;
     pr.sprout.rotation.z = Math.sin(t * 6) * 0.2 + (moving ? -0.3 : 0) + (air ? 0.5 : 0);
     setFace(pr.head, playerFace(G, P, { rolling, launched, air, eating, firing: pr.fireT > 0 }));
     // 武器：换枪时弹一下
@@ -5293,7 +5488,7 @@ const R3 = (() => {
     pr.swap = Math.max(0, pr.swap - dt);
     const ks = 1 - pr.swap / 0.25, gs = pr.swap > 0 ? 0.3 + 0.7 * ks + Math.sin(ks * Math.PI) * 0.35 : 1;
     pr.hand.scale.setScalar(gs * 1.5);
-    pr.hand.visible = !rolling && !launched && !dead && !menu || (menu && id);
+    pr.hand.visible = !rolling && !launched && !dead && !menu && !celebrating || (menu && id);
     pr.hand.position.set(12.5, 19, 10 - P.recoil * 2.2);
     let hy = 0, hx = 0;
     if (id === 'pan' && P.attackT > 0) {
@@ -5897,6 +6092,9 @@ const R3 = (() => {
       if (G.restT < 3.4) { tx = G.cat.x; ty = G.cat.y; dist = D * 0.8; }
     }
     if (G.phase === 'launch') { tx = P.x; ty = P.y; dist = D * (G.cat?.state === 'wind' ? 0.72 : 1.1); }
+    if (G.over?.win) { tx = P.x; ty = P.y; dist = D * 0.88; }
+    if (!menu && G.phase === 'rest' && G.restT < 1.3 && !G.cat) { tx = P.x; ty = P.y; dist = D * 0.93; }
+    if (!menu && G.phase === 'fight' && P.slurpT > 0 && !G.enemies.length && !G.ebullets.length && !G.elobs.length && !G.interference) dist *= 1 - 0.035 * Math.sin(P.slurpT * Math.PI) * Settings.motion;
     const mode = G.interference?.kind === 'flip' ? 'flip' : G.cat && G.phase === 'rest' ? 'rest' : G.phase === 'launch' ? 'launch' : G.boss?.kind === 'fryer' ? 'tilt' : 'normal';
     if (mode !== patchMode) {
       if (!basePatch) basePatch = { ...patch };
@@ -6014,7 +6212,7 @@ const R3 = (() => {
     return { a: Math.atan2(v3b.z - P.y, v3b.x - P.x), d: Math.hypot(v3b.z - P.y, v3b.x - P.x) };
   }
   function info() { const r = renderer.info.render; return { calls: r.calls, triangles: r.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, dpr: dprCur }; }
-  return { init, restore, resize, draw, project, aimFrom, directionFrom, info, FACE, metrics, get viewRoll() { return viewRoll; }, _dbg: () => ({ riceU, riceMesh, patch, scene, camera, player, bossRigs, proceduralTarget }), get renderer() { return renderer; } };
+  return { init, restore, resize, draw, project, aimFrom, directionFrom, info, portrait, FACE, metrics, get viewRoll() { return viewRoll; }, _dbg: () => ({ riceU, riceMesh, patch, scene, camera, player, bossRigs, proceduralTarget }), get renderer() { return renderer; } };
 })();
 
 // ===== src/hud.js =====
@@ -6431,25 +6629,15 @@ const HUD = (() => {
     drawContext(L);
   }
   function face(x, y, r) {
-    const G = Game, P = G.p, hurt = P.hurtT > 0 || G.hurtFlash > 0.05, happy = P.chew > 0 || P.burpT > 0, low = P.hp / P.maxHp < 0.3, blink = Math.sin(G.real * 1.3) > 0.97;
-    cachedRegion(`face:${hurt}:${happy}:${low}:${blink}`, x - r - 5, y - r - 5, r * 2 + 10, r * 2 + 10, () => paintFace(x, y, r));
-  }
-  function paintFace(x, y, r) {
-    const G = Game, P = G.p;
-    disc(x, y, r, '#fffaf0', P.hp / P.maxHp < 0.3 ? '#ff6a5a' : null);
-    ctx.fillStyle = '#2a4a3a'; ctx.beginPath(); ctx.moveTo(x - r * 0.7, y + r * 0.45); ctx.quadraticCurveTo(x, y + r * 1.05, x + r * 0.7, y + r * 0.45); ctx.lineTo(x + r * 0.55, y + r * 0.85); ctx.lineTo(x - r * 0.55, y + r * 0.85); ctx.fill();
-    const hurt = P.hurtT > 0 || G.hurtFlash > 0.05, happy = P.chew > 0 || P.burpT > 0, low = P.hp / P.maxHp < 0.3;
-    stroke(Math.max(2, r * 0.12));
-    const ey = y - r * 0.1, ex = r * 0.34;
-    if (hurt) { for (const sx of [-1, 1]) { ctx.beginPath(); ctx.moveTo(x + sx * ex - r * 0.12, ey - r * 0.12); ctx.lineTo(x + sx * ex + r * 0.12, ey + r * 0.12); ctx.moveTo(x + sx * ex + r * 0.12, ey - r * 0.12); ctx.lineTo(x + sx * ex - r * 0.12, ey + r * 0.12); ctx.stroke(); } }
-    else if (happy) { for (const sx of [-1, 1]) { ctx.beginPath(); ctx.arc(x + sx * ex, ey + r * 0.05, r * 0.12, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke(); } }
-    else { ctx.fillStyle = INK; for (const sx of [-1, 1]) { ctx.beginPath(); ctx.ellipse(x + sx * ex, ey, r * 0.09, r * (Math.sin(G.real * 1.3) > 0.97 ? 0.02 : 0.14), 0, 0, TAU); ctx.fill(); } }
-    ctx.beginPath();
-    if (low || hurt) { ctx.moveTo(x - r * 0.15, y + r * 0.25); ctx.quadraticCurveTo(x, y + r * 0.12, x + r * 0.15, y + r * 0.25); }
-    else if (happy) { ctx.arc(x, y + r * 0.15, r * 0.16, 0.1, Math.PI - 0.1); }
-    else { ctx.moveTo(x - r * 0.1, y + r * 0.2); ctx.quadraticCurveTo(x, y + r * 0.3, x + r * 0.1, y + r * 0.2); }
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(255,120,120,0.5)'; for (const sx of [-1, 1]) { ctx.beginPath(); ctx.ellipse(x + sx * r * 0.55, y + r * 0.12, r * 0.13, r * 0.08, 0, 0, TAU); ctx.fill(); }
+    const portrait = R3.portrait?.();
+    const P = Game.p;
+    const frame = portrait?.frame ?? HeroArt.names.indexOf(HeroArt.expression(Game, P, { rolling: P.dashT > 0, launched: Game.phase === 'launch' || Game.phase === 'drop', air: P.z > 0.5, eating: P.chew > 0 || P.blocked >= 0, firing: P.muzzle > 0 }));
+    const image = portrait?.image || HeroArt.atlas((w, h) => { const c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : document.createElement('canvas'); c.width = w; c.height = h; return c; });
+    const low = P.hp / P.maxHp < 0.3;
+    cachedRegion(`hero-face:${frame}:${low}`, x - r - 5, y - r - 5, r * 2 + 10, r * 2 + 10, () => {
+      disc(x, y, r, '#e9f3ff', low ? '#ff7a83' : '#81b6ef');
+      HeroArt.portrait(ctx, image, frame, x, y, r * 0.94);
+    });
   }
   function drawPotProgress(L, s, top) {
     const G = Game, cx = W / 2, y = L.portrait ? top + 92 * s : top + 14 * s;
