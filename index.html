@@ -3,7 +3,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#2a1c12">
-<meta name="application-version" content="0.11.0">
+<meta name="application-version" content="0.11.1">
 <link rel="manifest" href="./game.webmanifest">
 <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -23,7 +23,7 @@
 <script type="importmap">
 {"imports":{"three":"./vendor/three.module.js","three/addons/":"./vendor/addons/"}}
 </script>
-<div id="stage"><canvas id="gl"></canvas><canvas id="ui" tabindex="0" aria-label="吃大米饭"></canvas><div id="boot">开饭…</div><div id="version" data-build="74a92faa" aria-label="版本 0.11.0">v0.11.0</div></div>
+<div id="stage"><canvas id="gl"></canvas><canvas id="ui" tabindex="0" aria-label="吃大米饭"></canvas><div id="boot">开饭…</div><div id="version" data-build="60befa73" aria-label="版本 0.11.1">v0.11.1</div></div>
 <script type="module">
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
@@ -946,6 +946,33 @@ const Game = (() => {
     return best;
   }
   G.riceOverlap = riceOverlap;
+  // 只检查身体真正经过的饭格，勺子间距沿前进方向保留。
+  // 已经重叠的格子允许走出，侧面的饭堆不再扩大成一堵隐形墙。
+  function moveRiceAxis(P, delta, axis, r, gap, rolling, overRice) {
+    if (!delta) return;
+    if (overRice) { P[axis] += delta; return; }
+    const R = G.rice, C = CFG.CELL, start = P[axis], cross = P[axis === 'x' ? 'y' : 'x'];
+    const x1 = P.x + (axis === 'x' ? delta : 0), y1 = P.y + (axis === 'y' ? delta : 0);
+    const i0 = Math.max(0, Math.floor((Math.min(P.x, x1) - r - gap - R.ox) / C));
+    const i1 = Math.min(R.n - 1, Math.floor((Math.max(P.x, x1) + r + gap - R.ox) / C));
+    const j0 = Math.max(0, Math.floor((Math.min(P.y, y1) - r - gap - R.oy) / C));
+    const j1 = Math.min(R.n - 1, Math.floor((Math.max(P.y, y1) + r + gap - R.oy) / C));
+    let step = delta;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const k = j * R.n + i; if (!R.hp[k]) continue;
+      const rx = R.ox + i * C, ry = R.oy + j * C;
+      if (rolling) { if (circleRect(x1, y1, r, rx, ry, C, C)) shovel(k); continue; }
+      const near = axis === 'x' ? ry : rx, side = cross - clamp(cross, near, near + C);
+      if (Math.abs(side) >= r) continue;
+      const inset = Math.sqrt(r * r - side * side), edge = axis === 'x' ? rx : ry;
+      const lo = edge - inset, hi = edge + C + inset;
+      if (start > lo + 0.001 && start < hi - 0.001) continue;
+      // Within an existing spoon gap, keep the body free to move rather than pushing it back.
+      if (delta > 0 && start <= lo + 0.001) step = Math.min(step, Math.max(0, (start <= lo - gap + 0.001 ? lo - gap : lo) - start));
+      if (delta < 0 && start >= hi - 0.001) step = Math.max(step, Math.min(0, (start >= hi + gap - 0.001 ? hi + gap : hi) - start));
+    }
+    P[axis] += step;
+  }
   const cellCenter = k => {
     const R = G.rice, i = k % R.n, j = (k / R.n) | 0;
     return { x: R.ox + (i + 0.5) * CFG.CELL, y: R.oy + (j + 0.5) * CFG.CELL };
@@ -1259,7 +1286,7 @@ const Game = (() => {
     if (cmd.manualFire === undefined) return;
     const P = G.p, W = G.weapon(), w = P.weps[P.wi]; G.target = null;
     if (!W || G.phase === 'launch' || G.phase === 'drop' || G.resumeGrace > 0 || G.over) { cmd.fire = false; cmd.cancelCharge = true; return; }
-    const touch = cmd.touch, auto = Settings.auto(touch), aim = Settings.aim(touch), direct = cmd.manualAim && (touch || !aim);
+    const touch = cmd.touch, auto = Settings.auto(touch), aim = Settings.aim(touch), direct = !aim || cmd.manualAim && touch;
     const range = W.kind === 'proj' ? W.spd * W.life + 25 : W.kind === 'lob' ? W.maxD : W.kind === 'charge' ? W.len : W.range + 12;
     let best = null, score = Infinity;
     for (const e of G.enemies) {
@@ -1277,10 +1304,13 @@ const Game = (() => {
     if (best && aim && !(touch && cmd.manualAim)) {
       cmd.aim = true; cmd.aimA = Math.atan2(best.y - P.y, best.x - P.x); cmd.aimD = Math.hypot(best.x - P.x, best.y - P.y);
     }
-    const firing = auto && (G.phase === 'fight' || G.phase === 'boss') && P.dashT <= 0;
+    const firing = auto && !!best && (G.phase === 'fight' || G.phase === 'boss') && P.dashT <= 0;
     cmd.fire = cmd.manualFire || firing;
-    cmd.cancelCharge = !cmd.manualFire && !firing;
-    if (W.kind === 'charge' && firing && !cmd.manualFire) cmd.fire = (w.charge || 0) < W.charge * 0.97;
+    cmd.cancelCharge = !cmd.manualFire && !firing && !!w.autoCharge;
+    if (W.kind === 'charge') {
+      if (cmd.manualFire) w.autoCharge = false;
+      else if (firing) { w.autoCharge = true; cmd.fire = (w.charge || 0) < W.charge * 0.97; }
+    }
   }
   G.assist = assist;
   function updateRefillGuide() {
@@ -1415,22 +1445,11 @@ const Game = (() => {
       const acc = 1 - Math.exp(-dt * (mx || my ? 26 : 32) * (P.z > 0 ? 0.6 : 1));
       P.vx = lerp(P.vx, mx * spd, acc); P.vy = lerp(P.vy, my * spd, acc);
     }
-    // 勺子负责够饭，身体在米饭前留出距离。
+    // 身体碰撞宽度固定；饱腹和挥勺只影响动作、速度，不会把窄路突然堵住。
     let blocked = -1;
-    const r = P.r + 3 * fullF, riceR = r + (P.dashT > 0 ? 0 : CFG.SPOON_GAP), overRice = P.z > 22;
-    const nx = P.x + P.vx * dt;
-    let k = overRice ? -1 : riceOverlap(nx, P.y, riceR);
-    if (k >= 0) {
-      if (P.dashT > 0) { shovel(k); P.x = nx; }
-      else { blocked = k; P.vx = 0; }
-    } else P.x = nx;
-    const ny = P.y + P.vy * dt;
-    k = overRice ? -1 : riceOverlap(P.x, ny, riceR);
-    if (k >= 0) {
-      if (P.dashT > 0) { shovel(k); P.y = ny; }
-      else { if (blocked < 0) blocked = k; P.vy = 0; }
-    } else P.y = ny;
-    if (P.dashT <= 0 && P.z <= 0) { const kk = riceOverlap(P.x, P.y, riceR - 2); if (kk >= 0) { const c = cellCenter(kk); const a = Math.atan2(P.y - c.y, P.x - c.x); P.x += Math.cos(a) * 90 * dt; P.y += Math.sin(a) * 90 * dt; } }
+    const r = P.r + 3 * fullF, rolling = P.dashT > 0, overRice = P.z > 22;
+    moveRiceAxis(P, P.vx * dt, 'x', P.r, rolling ? 0 : CFG.SPOON_GAP, rolling, overRice);
+    moveRiceAxis(P, P.vy * dt, 'y', P.r, rolling ? 0 : CFG.SPOON_GAP, rolling, overRice);
     obsPush(P, r, P.z);
     const d = Math.hypot(P.x, P.y), lim = CFG.POT_R - r - 12;
     if (d > lim) { P.x *= lim / d; P.y *= lim / d; }
@@ -1442,11 +1461,20 @@ const Game = (() => {
       for (let j = Math.max(0, Math.floor((P.y - reach - R.oy) / C)); j <= Math.min(R.n - 1, Math.floor((P.y + reach - R.oy) / C)); j++)
         for (let i = Math.max(0, Math.floor((P.x - reach - R.ox) / C)); i <= Math.min(R.n - 1, Math.floor((P.x + reach - R.ox) / C)); i++) {
           const kk = j * R.n + i; if (!R.hp[kk]) continue;
-          const x = clamp(P.x, R.ox + i * C, R.ox + (i + 1) * C), y = clamp(P.y, R.oy + j * C, R.oy + (j + 1) * C);
-          const dx = x - P.x, dy = y - P.y, dd = Math.hypot(dx, dy);
-          if (dd >= best || dd > reach || (dx * cmd.mx + dy * cmd.my) / Math.max(1, dd * Math.hypot(cmd.mx, cmd.my)) < 0.65) continue;
+          let x = clamp(P.x, R.ox + i * C, R.ox + (i + 1) * C), y = clamp(P.y, R.oy + j * C, R.oy + (j + 1) * C);
+          let dx = x - P.x, dy = y - P.y;
+          const embedded = Math.hypot(dx, dy) < 0.001;
+          if (embedded) {
+            // 落地或地形变化后身处饭格时，朝输入方向舀走脚下米饭。
+            const tx = cmd.mx > 0 ? (R.ox + (i + 1) * C - P.x) / cmd.mx : cmd.mx < 0 ? (R.ox + i * C - P.x) / cmd.mx : Infinity;
+            const ty = cmd.my > 0 ? (R.oy + (j + 1) * C - P.y) / cmd.my : cmd.my < 0 ? (R.oy + j * C - P.y) / cmd.my : Infinity;
+            const edge = Math.min(tx, ty); if (edge <= 0.001) continue;
+            dx = cmd.mx * edge; dy = cmd.my * edge; x = P.x + dx; y = P.y + dy;
+          }
+          const dd = Math.hypot(dx, dy), score = dd + (embedded ? reach : 0);
+          if (score >= best || dd > reach || (dx * cmd.mx + dy * cmd.my) / Math.max(1, dd * Math.hypot(cmd.mx, cmd.my)) < 0.65) continue;
           const obstruction = bulletObs((P.x + x) * 0.5, (P.y + y) * 0.5, 2, 20); if (obstruction) continue;
-          best = dd; blocked = kk; P.eatTarget = { x, y }; P.biteA = Math.atan2(dy, dx);
+          best = score; blocked = kk; P.eatTarget = { x, y }; P.biteA = Math.atan2(dy, dx);
         }
     }
     if (P.eatTarget) {
@@ -1525,7 +1553,7 @@ const Game = (() => {
   function updateWeapon(dt, cmd) {
     const P = G.p, w = P.weps[P.wi]; if (!w) return;
     const W = WEAPONS[w.id], cost = W.cost * P.s.costMul;
-    if (cmd.cancelCharge) { w.charge = 0; P.charging = 0; }
+    if (cmd.cancelCharge) { w.charge = 0; w.autoCharge = false; P.charging = 0; }
     P.fireCd -= dt;
     if (w.catchT > 0) {
       w.catchT -= dt;
@@ -1539,7 +1567,7 @@ const Game = (() => {
         w.charge = Math.min(W.charge, (w.charge || 0) + dt * P.s.rate * (P.buffs.frenzy > 0 ? 1.5 : 1)); P.charging = w.charge / W.charge;
       } else if (w.charge > 0) {
         if (w.charge > 0.12 && P.fireCd <= 0) { P.full = Math.max(0, P.full - cost); fireBeam(W, w.charge / W.charge); P.fireCd = W.cd; }
-        w.charge = 0; P.charging = 0;
+        w.charge = 0; w.autoCharge = false; P.charging = 0;
       } else if (cmd.fire && P.full < cost) emptyGun();
       return;
     }
@@ -3370,7 +3398,7 @@ const R3 = (() => {
     m.userData.pal = p; m.userData.ol = ol || 0;
     return m;
   }
-  function prep(geo, mtx, color, ol, detail = 0) {
+  function prep(geo, mtx, color, ol, detail = 0, outlineScale = 1) {
     // Keep the exact triangles/normals while sharing vertices within each part.
     let g = geo.clone();
     for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal') g.deleteAttribute(k);
@@ -3379,7 +3407,7 @@ const R3 = (() => {
     g.applyMatrix4(mtx);
     // 描边：沿世界法线外推，厚度换算成世界单位后夹在 0.8~2.2 之间（零件被拉得很长时不会长出一大片黑边）
     if (ol) {
-      const sx = s3.setFromMatrixScale(mtx), sm = Math.max(sx.x, sx.y, sx.z), th = outlineProjectile ? clamp(ol * sm * 0.3, 0.035, 0.12) : clamp(ol * sm, 0.8, 2.2);
+      const sx = s3.setFromMatrixScale(mtx), sm = Math.max(sx.x, sx.y, sx.z), th = (outlineProjectile ? clamp(ol * sm * 0.3, 0.035, 0.12) : clamp(ol * sm, 0.8, 2.2)) * outlineScale;
       for (let i = 0; i < cnt; i++) { v3.set(n.getX(i), n.getY(i), n.getZ(i)).normalize(); p.setXYZ(i, p.getX(i) + v3.x * th, p.getY(i) + v3.y * th, p.getZ(i) + v3.z * th); }
     }
     if (color) { const a = new Float32Array(cnt * 3); for (let i = 0; i < cnt; i++) { a[i * 3] = color.r; a[i * 3 + 1] = color.g; a[i * 3 + 2] = color.b; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); }
@@ -3450,7 +3478,7 @@ const R3 = (() => {
     out.computeBoundingSphere(); return out;
   }
   // 把一组零件烘焙成：每类材质一份合并网格 + 一份描边网格 + 一份表情贴花
-  function bake(root) {
+  function bake(root, outlineScale = 1) {
     root.updateMatrixWorld(true);
     const parts = [[], [], [], [], []], outl = [], faces = [];
     root.traverse(o => {
@@ -3459,13 +3487,13 @@ const R3 = (() => {
       if (!o.userData.pal) return;
       const p = o.userData.pal;
       parts[p.k].push(prep(o.geometry, o.matrixWorld, p.color, 0, p.detail));
-      if (o.userData.ol) outl.push(prep(o.geometry, o.matrixWorld, null, o.userData.ol));
+      if (o.userData.ol) outl.push(prep(o.geometry, o.matrixWorld, null, o.userData.ol, 0, outlineScale));
     });
     return { geos: parts.map(l => merge(l, true)), ol: merge(outl, false), face: faces.length ? mergeFace(faces) : null };
   }
   // 普通（非实例化）版本：返回一个 Group；有脸的话可以用 setFace 换表情
-  function bakeGroup(root, fade) {
-    const b = bake(root), g = new THREE.Group(), mats = fade ? MAT.clsF : MAT.cls;
+  function bakeGroup(root, fade, outlineScale = 1) {
+    const b = bake(root, outlineScale), g = new THREE.Group(), mats = fade ? MAT.clsF : MAT.cls;
     b.geos.forEach((geo, k) => { if (geo) { const m = new THREE.Mesh(geo, mats[k]); m.castShadow = k !== 3; m.matrixAutoUpdate = false; g.add(m); } });
     if (b.ol) g.add(new THREE.Mesh(b.ol, fade ? MAT.outlineF : MAT.outline));
     if (b.face) {
@@ -4679,21 +4707,21 @@ const R3 = (() => {
     base.add(mk(GEO.rbox, PAL.woodDark, 8, 6, 0, 62, 12, 40, 0.4));
     for (let i = 0; i < 4; i++) { const t = mk(GEO.torus, PAL.spring, -2, 15 + i * 4.5, 0, 7, 7, 30); t.rotation.x = Math.PI / 2; base.add(t); }
     base.add(mk(GEO.rbox, PAL.gold, 8, 12.5, 0, 64, 1.5, 42));
-    const baseModel = bakeGroup(base); root.add(baseModel);
+    const baseModel = bakeGroup(base, false, 0.3); root.add(baseModel);
     const details = grp();
     for (const side of [-1, 1]) {
       details.add(mk(GEO.cyl, PAL.steelDark, 23, 13, side * 17, 5, 22, 5, 0.2));
       details.add(mk(GEO.sphereLo, PAL.gold, 23, 26, side * 17, 6, 4, 6, 0.15));
       details.add(mk(GEO.rbox, PAL.lacquer, -4, 6, side * 23, 40, 7, 7, 0.25));
     }
-    root.add(bakeGroup(details));
+    root.add(bakeGroup(details, false, 0.3));
     const armPiv = grp(); armPiv.position.set(32, 14, 0); root.add(armPiv);
     const ab = grp();
     ab.add(mk(GEO.rbox, PAL.woodLight, -16, 4, 0, 34, 4, 8, 0.4));
     ab.add(mk(GEO.sphereMid, PAL.woodLight, -32, 7, 0, 22, 4, 18, 0.4));
     ab.add(mk(GEO.sphereTop, PAL.rice, -32, 9, 0, 17, 5, 13, 0.3));
     face(ab, -32, 10, 0, 20, 15, 0).rotation.x = -Math.PI / 2;
-    armPiv.add(bakeGroup(ab));
+    armPiv.add(bakeGroup(ab, false, 0.3));
     const ringM = new THREE.Mesh(GEO.ring, MAT.aimRing.clone()); ringM.position.set(0, 2, 0); ringM.scale.setScalar(44); ringM.renderOrder = 4; root.add(ringM);
     const arrow = grp();
     for (let i = 0; i < 3; i++) { const c = new THREE.Mesh(GEO.cone, MAT.add.clone()); c.rotation.z = -Math.PI / 2; c.scale.set(10, 14, 3); c.position.set(70 + i * 26, 6, 0); c.material.color.set('#ffd34d'); arrow.add(c); }
