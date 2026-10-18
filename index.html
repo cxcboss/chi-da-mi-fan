@@ -1,6 +1,10 @@
 <!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>吃大米饭</title>
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#2a1c12">
+<link rel="manifest" href="./game.webmanifest">
+<link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Noto+Sans+SC:wght@600;700&display=swap">
@@ -8,6 +12,8 @@
   html{color-scheme:dark}
   html,body{margin:0;height:100%;background:#2a1c12;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
   #stage{position:fixed;inset:0;width:100%;height:100%;height:100dvh;overflow:hidden}
+  #stage:fullscreen{width:100vw;height:100vh;background:#2a1c12}
+  #stage:-webkit-full-screen{width:100vw;height:100vh;background:#2a1c12}
   #gl,#ui{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
   #gl{pointer-events:none}#ui{outline:none}
   #boot{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:0 16px;color:#ffe9c0;font:600 18px "PingFang SC","Microsoft YaHei",sans-serif;text-align:center;background:#2a1c12}
@@ -36,6 +42,8 @@ const CFG = {
   JUMP_T: 0.52,       // 跳跃滞空
   JUMP_H: 58,         // 跳跃高度（敌弹飞在 15 左右，跳起来能躲过去）
   BULLET_Z: 15,
+  SPOON_GAP: 16,     // 身体与饭堆之间留出挥勺空间
+  SPOON_REACH: 68,
   ENRAGE: 50,         // BOSS 登场后 50 秒狂暴
   COLD: 100,          // BOSS 登场后 100 秒饭凉了
 };
@@ -58,14 +66,14 @@ function segClosest(px, py, x1, y1, x2, y2) {
   return { x: x1 + dx * t, y: y1 + dy * t, t };
 }
 
-// ---------------- 一顿饭 = 3 口锅连着吃，火候决定难度 ----------------
+// ---------------- 七口锅连着吃，火候决定难度 ----------------
 // spawn: [类型, 权重, 最早出现（占开饭时长的比例）]
 // obs: 这口锅里的障碍物 / 机关数量
 const POTS = [
   {
     id: 'white', name: '白米饭锅', desc: '刚煮好的白米饭，饭团兵在巡逻',
     density: 0.12, bossHp: 2000,
-    spawn: [['oni', 1, 0], ['pea', 0.4, 0.25], ['radish', 0.32, 0.5]],
+    spawn: [['oni', 1, 0], ['pea', 0.4, 0.25], ['garlic', 0.35, 0.25], ['radish', 0.32, 0.5]],
     obs: { soy: 3, chop: 4, barrel: 3, shaker: 2, hot: 5 },
     mid: 'chest', boss: 'general', bossName: '大饭团将军', bossSub: '它跳起来砸人，砸累了会坐下喘气',
     hazard: null,
@@ -74,7 +82,7 @@ const POTS = [
   {
     id: 'egg', name: '蛋炒饭锅', desc: '金灿灿的蛋炒饭，锅里还在溅热油',
     density: 0.18, bossHp: 2500,
-    spawn: [['oni', 0.55, 0], ['egg', 0.8, 0], ['pea', 0.45, 0.2], ['chili', 0.3, 0.45]],
+    spawn: [['oni', 0.55, 0], ['egg', 0.8, 0], ['shrimp', 0.55, 0.1], ['pea', 0.45, 0.2], ['chili', 0.3, 0.45]],
     obs: { shell: 5, soy: 2, chop: 3, barrel: 3, shaker: 2 },
     mid: 'eggqueen', boss: 'spatula', bossName: '锅铲大侠', bossSub: '它会铲起一整条饭，再一铲拍扁你',
     hazard: 'oil',
@@ -83,11 +91,41 @@ const POTS = [
   {
     id: 'curry', name: '咖喱饭锅', desc: '咖喱汁会拖慢脚步，蒸汽孔会把人顶飞',
     density: 0.2, bossHp: 3400,
-    spawn: [['oni', 0.4, 0], ['chili', 0.75, 0.1], ['egg', 0.4, 0.3], ['pea', 0.45, 0.2], ['radish', 0.35, 0.45]],
+    spawn: [['oni', 0.4, 0], ['mushroom', 0.65, 0], ['chili', 0.75, 0.1], ['egg', 0.4, 0.3], ['pea', 0.45, 0.2], ['radish', 0.35, 0.45]],
     obs: { potato: 5, soy: 2, barrel: 4, vent: 4 },
     mid: 'porkking', boss: 'cooker', bossName: '高压锅魔王', bossSub: '压力满了会炸飞锅盖，那时它最脆弱',
     hazard: 'curry',
     look: { rice: '#fbf5e8', riceHi: '#ffffff', riceLo: '#cdbf9f', floor: '#e6d2aa', floorKind: 'clay', floor2: '#6a3f2a', floorLine: 'rgba(255,200,160,0.14)', bg: '#1c1009', pot: '#5c3424', bits: ['#ff9a3a', '#7a4a2a'], accent: '#e8892a' },
+  },
+  {
+    id: 'nori', name: '海苔旋风饭', desc: '海苔风场会推着大家转圈，跳起来脱离风场',
+    density: 0.16, bossHp: 3600,
+    spawn: [['pea', 0.9, 0], ['garlic', 0.6, 0], ['carrier', 0.4, 0.15], ['radish', 0.65, 0], ['oni', 0.5, 0.2], ['egg', 0.4, 0.45]],
+    obs: { chop: 5, shaker: 3, shell: 4, vent: 4 },
+    mid: 'eggqueen', boss: 'spatula', bossName: '海苔旋风铲', bossSub: '风场与翻转一起来，跳起来稳住脚步', hazard: 'wind',
+    look: { rice: '#e6f0c8', riceHi: '#fbffe8', riceLo: '#9ca86e', floor: '#a3bd7b', floorKind: 'brush', floor2: '#263f32', floorLine: 'rgba(188,255,195,0.13)', bg: '#0e211a', pot: '#315345', bits: ['#294e37', '#8cc962', '#fff5c0'], accent: '#8fdf8e' },
+  },
+  {
+    id: 'mapo', name: '麻婆豆腐饭', desc: '辣油连环爆开，豆腐阵里找空隙',
+    density: 0.23, bossHp: 4000,
+    spawn: [['chili', 1, 0], ['youtiao', 0.7, 0], ['mushroom', 0.5, 0.1], ['egg', 0.7, 0], ['pea', 0.5, 0.15], ['radish', 0.5, 0.35]],
+    obs: { potato: 7, barrel: 5, shaker: 3, hot: 6 },
+    mid: 'porkking', boss: 'general', bossName: '麻辣饭团霸王', bossSub: '饭墙与辣油封路，翻滚开出一条路', hazard: 'oil',
+    look: { rice: '#ffe4b6', riceHi: '#fff5db', riceLo: '#ce9c5d', floor: '#f4ad69', floorKind: 'clay', floor2: '#8a3024', floorLine: 'rgba(255,219,166,0.12)', bg: '#2b100d', pot: '#713d31', bits: ['#e74125', '#fff4cf', '#5a9c48'], accent: '#ff7453' },
+  },
+  {
+    id: 'gold', name: '黄金锅巴饭', desc: '酱汁黏住脚步，黄金饭墙正在隆起',
+    density: 0.15, bossHp: 4700,
+    spawn: [['oni', 0.7, 0], ['carrier', 0.5, 0], ['shrimp', 0.7, 0], ['youtiao', 0.5, 0.1], ['pea', 0.6, 0], ['chili', 0.7, 0.1], ['egg', 0.6, 0.15]],
+    obs: { soy: 3, barrel: 5, vent: 5, hot: 3 },
+    mid: 'porkking', boss: 'cooker', bossName: '黄金高压锅王', bossSub: '击碎压力阀，趁开盖时打出最后一击', hazard: 'curry', terrainPulse: true,
+    look: { rice: '#ffe3a0', riceHi: '#fff6d5', riceLo: '#c08b32', floor: '#e5b057', floorKind: 'honey', floor2: '#6a4725', floorLine: 'rgba(255,234,163,0.15)', bg: '#211709', pot: '#8a6430', bits: ['#ffc83a', '#d66e2b', '#7bab46'], accent: '#ffe076' },
+  },
+  {
+    id: 'machine', name: '暴走炒饭工厂', desc: '先吃出抓地路线，小心整口锅向一边倾斜', density: 0.1, bossHp: 5400,
+    spawn: [['garlic', 0.6, 0], ['mushroom', 0.6, 0], ['shrimp', 0.7, 0], ['carrier', 0.45, 0.15], ['youtiao', 0.7, 0.1], ['pea', 0.4, 0]],
+    obs: { chop: 3, barrel: 5, shaker: 3, vent: 5 }, mid: 'eggqueen', boss: 'fryer', bossName: '暴走炒饭机', bossSub: '吃出安全路线，诱导冲撞撞碎饭墙', hazard: null,
+    look: { rice: '#fff0bb', riceHi: '#fffce7', riceLo: '#cbb06d', floor: '#d5e3df', floorKind: 'brush', floor2: '#33454a', floorLine: 'rgba(190,232,248,0.13)', bg: '#101c23', pot: '#557580', bits: ['#7bc35d', '#ed9350', '#ffe075'], accent: '#9cdeeb' },
   },
 ];
 const HEATS = [
@@ -127,9 +165,17 @@ const WEAPONS = {
   cleaver: { name: '菜刀飞刃', rar: 3, cost: 1, cd: 0.45, kind: 'proj', dmg: 24, spd: 640, life: 1.4, r: 9, pierce: 2, bounce: 3, vis: 'cleaver', desc: '撞到墙和障碍会弹开' },
   sushi: { name: '寿司镭射', rar: 3, cost: 2.5, cd: 0.25, kind: 'charge', dmg: 16, dmgMax: 90, charge: 0.9, len: 720, desc: '按住蓄力，松开放一道穿透光束' },
   steamer: { name: '电饭煲蒸汽炮', rar: 4, cost: 2.5, cd: 0.8, kind: 'cone', dmg: 60, range: 215, arc: 0.95, kb: 520, desc: '一口蒸汽喷飞面前一切，还能吹散子弹' },
+  ricochet: { name: '弹弹锅盖', rar: 3, cost: 0.8, cd: 0.48, kind: 'proj', dmg: 21, spd: 650, life: 2.2, r: 11, chain: 4, bounce: 2, vis: 'disc', desc: '命中后弹向附近目标，最多连续命中 5 个' },
+  vacuum: { name: '吸饭勺', rar: 2, cost: 0, cd: 0.16, kind: 'proj', dmg: 5, spd: 720, life: 0.85, r: 7, harvest: true, duration: 24, vis: 'scoop', desc: '击中米饭远程补饭力，24 秒后恢复原武器' },
+  mochi: { name: '年糕黏黏锤', rar: 3, cost: 0.65, cd: 0.48, kind: 'sticky', dmg: 32, range: 114, arc: 1.8, kb: 480, desc: '第一击黏住小怪，下一击甩出去撞倒怪群' },
+  nori: { name: '海苔回旋镖', rar: 2, cost: 0.75, cd: 0.7, kind: 'proj', dmg: 17, spd: 590, life: 1.8, r: 12, boomerang: true, pierce: 99, vis: 'nori', desc: '切开饭堆再飞回手中，移动能改变回程路线' },
+  strainer: { name: '火锅漏勺', rar: 3, cost: 0, cd: 0.85, kind: 'catch', dmg: 14, range: 138, arc: 1.8, desc: '接住正面敌弹，再压成大丸子打回去；松手提前反击' },
+  cheese: { name: '芝士喷枪', rar: 2, cost: 0.14, cd: 0.11, kind: 'proj', dmg: 4, spd: 580, life: 0.65, r: 7, cheese: 4.5, vis: 'cheese', desc: '相邻目标拉丝连接，击退一只会拖走整串' },
+  soda: { name: '冰镇汽水炮', rar: 3, cost: 0.9, cd: 0.55, kind: 'proj', dmg: 12, spd: 750, life: 0.8, r: 9, freeze: 1.1, kb: 360, vis: 'cap', desc: '瓶盖冻住目标，重击碎冰并把敌人打成炮弹' },
+  gyoza: { name: '锅贴地雷', rar: 2, cost: 1.2, cd: 0.65, kind: 'mine', dmg: 34, range: 290, boom: 104, desc: '扔到地上等敌人踩，翻面弹起掀翻一圈食材' },
 };
 const WEAPON_IDS = Object.keys(WEAPONS);
-const WEAPON_MUZZLE = { chopbow: 26, pan: 30, ricegun: 22, paddle: 27, soy: 21, rollpin: 28, whisk: 25, chili: 26, onigiri: 14, popcorn: 21, cleaver: 24, sushi: 22, steamer: 24 };
+const WEAPON_MUZZLE = { chopbow: 26, pan: 30, ricegun: 22, paddle: 27, soy: 21, rollpin: 28, whisk: 25, chili: 26, onigiri: 14, popcorn: 21, cleaver: 24, sushi: 22, steamer: 24, ricochet: 24, vacuum: 28, mochi: 26, nori: 24, strainer: 27, cheese: 24, soda: 23, gyoza: 20 };
 
 // ---------------- 配菜：碰到就吃，不弹窗 ----------------
 const SIDES = {
@@ -142,6 +188,10 @@ const SIDES = {
   ume: { name: '梅干', col: '#d0263a', desc: '暴击 +7%', max: 3 },
   corn: { name: '玉米粒', col: '#ffd93a', desc: '饭力回得更多、用得更省', max: 3 },
   yolk: { name: '蛋黄', col: '#ffb412', desc: '饱嗝冷却 -2 秒、威力 +20%', max: 3 },
+  clock: { name: '冰镇时钟', col: '#8fe8ff', desc: '子弹时间 · 敌人与敌弹减速 7 秒', max: 0, consumable: true },
+  magnet: { name: '吸饭磁铁', col: '#b4a3ff', desc: '10 秒大范围吸收饭力与配菜', max: 0, consumable: true },
+  frenzy: { name: '爆辣酱', col: '#ff8260', desc: '8 秒射速与伤害提升', max: 0, consumable: true },
+  feast: { name: '加饭便当', col: '#c9ee93', desc: '立即补充 35 饭力与 15 生命', max: 0, consumable: true },
 };
 const SIDE_IDS = Object.keys(SIDES);
 
@@ -162,6 +212,7 @@ function hudLayout(W, H) {
     moveHome: { x: l + 78 * u, y: bottom - 85 * u, r: 55 * u },
     pause: { x: r - 20 * s, y: safe.top + 30 * s, r: 21 * s },
     auto: { x: r - 20 * s - 58, y: safe.top + 30 * s, r: 21 * s },
+    aim: { x: portrait ? r - 30 * s : r - 20 * s - 126, y: safe.top + (portrait ? 100 : 30) * s, r: 21 * s },
   };
   const positions = Settings.positions[portrait ? 'portrait' : 'landscape'];
   for (const key of ['jump', 'dash', 'ult', 'swap', 'use', 'moveHome', 'aimHome']) {
@@ -172,6 +223,12 @@ function hudLayout(W, H) {
     b.r = rad;
   }
   return L;
+}
+function weaponInfoLayout(W, H) {
+  const safe = Settings.safe, w = Math.max(1, Math.min(500, W - safe.left - safe.right - 24));
+  const h = Math.max(1, Math.min(370, H - safe.top - safe.bottom - 24));
+  const x = safe.left + (W - safe.left - safe.right - w) / 2, y = safe.top + (H - safe.top - safe.bottom - h) / 2;
+  return { x, y, w, h, done: { x: x + w * 0.2, y: y + h - Math.min(56, h * 0.2), w: w * 0.6, h: Math.min(40, h * 0.14) } };
 }
 function pauseLayout(W, H) {
   const landscape = W > H * 1.1 || H - Settings.safe.top - Settings.safe.bottom < 720;
@@ -297,13 +354,13 @@ class RiceBlur {
 // ===== src/settings.js =====
 // Preferences are independent of rendering quality and the simulation clock.
 const Settings = (() => {
-  const defaults = { autoTouch: true, autoDesktop: false, aimTouch: true, aimDesktop: false, motion: 1, controls: 1, opacity: 0.65, music: 0.38, sfx: 0.8, stick: 'floating', positions: { portrait: {}, landscape: {} } };
+  const defaults = { assistVersion: 2, autoTouch: false, autoDesktop: false, aimTouch: false, aimDesktop: false, motion: 1, controls: 1, opacity: 0.65, music: 0.38, sfx: 0.8, stick: 'floating', positions: { portrait: {}, landscape: {} } };
   const S = { ...defaults, positions: { portrait: {}, landscape: {} }, safe: { top: 0, right: 0, bottom: 0, left: 0 } };
   S.load = store => {
     S.store = store;
     try {
       const v = JSON.parse(store.get('settings7') || '{}');
-      for (const k of ['autoTouch', 'autoDesktop', 'aimTouch', 'aimDesktop']) if (typeof v[k] === 'boolean') S[k] = v[k];
+      for (const k of ['autoTouch', 'autoDesktop', 'aimTouch', 'aimDesktop']) S[k] = v.assistVersion === defaults.assistVersion && typeof v[k] === 'boolean' ? v[k] : false;
       for (const [k, lo, hi] of [['motion', 0, 1], ['controls', 0.8, 1.3], ['opacity', 0.35, 1], ['music', 0, 1], ['sfx', 0, 1]]) if (Number.isFinite(v[k])) S[k] = clamp(v[k], lo, hi);
       if (v.stick === 'fixed' || v.stick === 'floating') S.stick = v.stick;
       for (const mode of ['portrait', 'landscape']) for (const name of ['jump', 'dash', 'ult', 'swap', 'use', 'moveHome', 'aimHome']) {
@@ -468,6 +525,14 @@ const Sfx = (() => {
     cleaver() { noise({ f: 7000, dur: 0.22, vol: 0.08, ft: 'highpass' }); tone({ type: 'sawtooth', f: 2300, f2: 3300, dur: 0.07, vol: 0.04, hp: 1500 }); tone({ type: 'sine', f: 2650, dur: 0.3, vol: 0.05, t: 0.02, jit: false }); tone({ type: 'sine', f: 3950, dur: 0.22, vol: 0.03, t: 0.02, jit: false }); },
     sushi() {},
     steamer() { noise({ f: 3200, f2: 1500, dur: 0.55, vol: 0.34, ft: 'highpass' }); noise({ f: 700, dur: 0.3, vol: 0.2, ft: 'lowpass' }); tone({ type: 'sine', f: 85, f2: 40, dur: 0.35, vol: 0.35 }); },
+    mochi() { tone({ type: 'sine', f: 190, f2: 95, dur: 0.2, vol: 0.16, vib: 19, vibAmt: 45 }); noise({ f: 900, dur: 0.05, vol: 0.08 }); },
+    nori() { noise({ f: 2800, f2: 1200, dur: 0.18, vol: 0.1, ft: 'highpass' }); },
+    strainer() { metal(720, 0.18, 0.11); },
+    cheese() { if (!gate('cheese', 0.09)) return; tone({ type: 'sine', f: 260, f2: 150, dur: 0.09, vol: 0.08, vib: 23, vibAmt: 12 }); },
+    soda() { noise({ f: 5600, f2: 1600, dur: 0.18, vol: 0.17, ft: 'highpass' }); tone({ type: 'sine', f: 330, f2: 85, dur: 0.11, vol: 0.17 }); },
+    gyoza() { noise({ f: 2400, dur: 0.07, vol: 0.09 }); },
+    ricochet() { metal(960, 0.18, 0.12); },
+    vacuum() { if (!gate('vacuum', 0.1)) return; tone({ type: 'sine', f: 500, f2: 900, dur: 0.12, vol: 0.08 }); },
   };
   const S = {
     init,
@@ -542,6 +607,10 @@ const Sfx = (() => {
 
     weapon(id) { if (!ac || muted) return; (WEAPON_SFX[id] || WEAPON_SFX.chopbow)(); },
     panHit() { metal(330, 0.55, 0.22); noise({ f: 2500, dur: 0.05, vol: 0.15, q: 2 }); },
+    stickySnap() { tone({ type: 'sine', f: 520, f2: 110, dur: 0.18, vol: 0.15 }); noise({ f: 2700, dur: 0.04, vol: 0.1 }); },
+    iceCrack() { if (!gate('ice', 0.05)) return; for (let i = 0; i < 3; i++) tone({ type: 'triangle', f: 2100 + i * 930, f2: 1300, dur: 0.09, vol: 0.055, t: i * 0.025 }); noise({ f: 6000, dur: 0.09, vol: 0.1, ft: 'highpass' }); },
+    fry() { noise({ f: 4700, f2: 2200, dur: 0.24, vol: 0.16, ft: 'highpass' }); tone({ type: 'sine', f: 180, f2: 75, dur: 0.12, vol: 0.12 }); },
+    slurp() { if (!gate('slurp', 0.7)) return; noise({ f: 650, f2: 1800, dur: 0.33, vol: 0.11, q: 4 }); tone({ type: 'sine', f: 280, f2: 620, dur: 0.22, vol: 0.09 }); },
     chargeStart() { tone({ type: 'sine', f: 260, f2: 1300, dur: 0.9, vol: 0.08, vib: 9, vibAmt: 18 }); tone({ type: 'triangle', f: 130, f2: 650, dur: 0.9, vol: 0.05 }); },
     beam(k) {
       tone({ type: 'sawtooth', f: 1700 + 600 * k, f2: 180, dur: 0.25 + 0.25 * k, vol: 0.1 + 0.08 * k, lp: 4000 });
@@ -643,7 +712,7 @@ const Sfx = (() => {
 // 手机：左半屏移动摇杆；右半屏瞄准摇杆，拖出去就朝那个方向开火；右侧按钮跳 / 滚 / 嗝 / 换枪。
 const Input = (() => {
   const keys = Object.create(null);
-  const freshEdge = () => ({ dash: false, ult: false, jump: false, swap: false, use: false, pick: 0, start: false, mute: false, back: false, pause: false, auto: false });
+  const freshEdge = () => ({ dash: false, ult: false, jump: false, swap: false, use: false, pick: 0, start: false, mute: false, back: false, pause: false, auto: false, assistAim: false });
   const I = {
     W: 1, H: 1,
     touchMode: false, coarse: false, forceTouch: false, viewRoll: 0,
@@ -663,6 +732,7 @@ const Input = (() => {
         if (code === 'KeyP' || code === 'Escape') e.pause = true;
         if (code === 'KeyM') e.mute = true;
         if (code === 'KeyV') e.auto = true;
+        if (code === 'KeyB') e.assistAim = true;
         if (code === 'Enter' || code === 'Space') e.start = true;
         if (code === 'Escape') e.back = true;
         if (!I.forceTouch) I.touchMode = false;
@@ -680,6 +750,7 @@ const Input = (() => {
       if (I.menu) return;
       if (on(L.pause)) { e.pause = true; return; }
       if (on(L.auto)) { e.auto = true; return; }
+      if (on(L.aim)) { e.assistAim = true; return; }
       if (kind === 'touch' || kind === 'pen') {
         I.touchMode = true;
         if (on(L.jump)) { e.jump = true; I.held[id] = 'jump'; return; }
@@ -734,15 +805,16 @@ const Input = (() => {
       else { const ux = mx; mx = ux * cr + my * sr; my = -ux * sr + my * cr; }
       let aim = false, aimA = 0, aimD = 0, fire = !!keys.KeyJ, manualAim = false;
       if (I.aimStick) {
+        fire = true; // 按下即朝当前方向射击，拖动只负责改变方向。
         const dx = I.aimStick.x - I.aimStick.ox, dy = I.aimStick.y - I.aimStick.oy, d = Math.hypot(dx, dy);
-        if (d > 10) { aim = manualAim = true; const mapped = I.mapDirection ? I.mapDirection(dx, dy) : null; aimA = mapped ? Math.atan2(mapped.y, mapped.x) : Math.atan2(dy / CFG.K, dx) - roll; aimD = 90 + clamp((d - 10) / 45, 0, 1) * 300; fire = d > 20; }
-      } else if (!I.touchMode && I.mouse.moved && aimFn) {
-        const r = aimFn(I.mouse.x, I.mouse.y);
+        if (d > 10) { aim = manualAim = true; const mapped = I.mapDirection ? I.mapDirection(dx, dy) : null; aimA = mapped ? Math.atan2(mapped.y, mapped.x) : Math.atan2(dy / CFG.K, dx) - roll; aimD = 90 + clamp((d - 10) / 45, 0, 1) * 300; }
+      } else if (!I.touchMode) {
+        const r = I.mouse.moved && aimFn ? aimFn(I.mouse.x, I.mouse.y) : null;
         if (r) { aim = true; manualAim = true; aimA = r.a; aimD = r.d; }
         if (I.mouse.down) fire = true;
       }
       const e = I.edge;
-      const out = { mx, my, aim, aimA, aimD, fire, manualFire: fire, manualAim, touch: I.touchMode || I.forceTouch, auto: e.auto, dash: e.dash, jump: e.jump, ult: e.ult, swap: e.swap, use: e.use, pick: e.pick, start: e.start, mute: e.mute, back: e.back, pause: e.pause, taps: I.taps };
+      const out = { mx, my, aim, aimA, aimD, fire, manualFire: fire, manualAim, touch: I.touchMode || I.forceTouch, auto: e.auto, assistAim: e.assistAim, dash: e.dash, jump: e.jump, ult: e.ult, swap: e.swap, use: e.use, pick: e.pick, start: e.start, mute: e.mute, back: e.back, pause: e.pause, taps: I.taps };
       I.edge = freshEdge();
       I.taps = [];
       return out;
@@ -753,14 +825,16 @@ const Input = (() => {
 
 // ===== src/game.js =====
 // ---------------- 游戏逻辑（不碰 DOM / Canvas / WebGL，可在 Node 里直接跑模拟测试） ----------------
-// 一顿饭 = 白米饭锅 → 蛋炒饭锅 → 咖喱饭锅。每口锅：开饭（刷怪）→ 中场精英 → BOSS → 饭后时间（挑武器）→ 弹射勺把主角弹进下一口锅。
+// 七锅连续闯关：开饭 → 中场精英 → BOSS → 饭后选武器 → 弹射到下一锅。
 const Game = (() => {
   const G = { state: 'title', t: 0, real: 0, heat: 0, pot: 0, L: makeLevel(0, 0), sel: 0, dirty: [], phase: 'fight' };
   const enemyGrid = makeSpatialGrid(), bulletPool = [], enemyBulletPool = [], partPool = [], impactPool = [];
+  const BUFF_KEYS = ['clock', 'magnet', 'frenzy'], ENEMY_TIMERS = ['cheeseT', 'capFlipT', 'iceCrackT', 'traceT', 'tetherT'];
+  const FOOD_ENEMIES = new Set(['garlic', 'mushroom', 'shrimp', 'carrier', 'youtiao']);
   function addBullet(data) {
     const b = bulletPool.pop() || { hit: [] }, hit = b.hit;
     hit.length = 0; if (data.hit?.length) for (const e of data.hit) hit.push(e);
-    Object.assign(b, { slow: 0, burn: 0, bounce: 0, split: 0, flatten: false }, data); b.hit = hit;
+    Object.assign(b, { slow: 0, burn: 0, bounce: 0, chain: 0, chainTarget: null, harvest: false, split: 0, flatten: false, boomerang: false, returned: false, flightT: 0, cheese: 0, freeze: 0, lastCut: -1 }, data); b.hit = hit;
     G.bullets.push(b);
   }
   // 存档接口由平台层注入（网页用 localStorage，小程序用 wx.setStorageSync）
@@ -772,7 +846,7 @@ const Game = (() => {
     G.runs = +G.store.get('runs') || 0;
     try {
       const save = JSON.parse(G.store.get('run8') || 'null');
-      G.checkpoint = save?.version === 1 && Number.isInteger(save.heat) && save.heat >= 0 && save.heat < 3 && Number.isInteger(save.pot) && save.pot >= 0 && save.pot < 3 && save.player && typeof save.player === 'object' ? save : null;
+      G.checkpoint = save?.version === 1 && Number.isInteger(save.heat) && save.heat >= 0 && save.heat < HEATS.length && Number.isInteger(save.pot) && save.pot >= 0 && save.pot < POTS.length && save.player && typeof save.player === 'object' ? save : null;
     } catch (_) { G.checkpoint = null; }
     G.sel = 0; for (let i = 0; i < 3; i++) if (heatUnlocked(i, G.cleared) && !G.cleared.has(i)) { G.sel = i; break; }
   };
@@ -782,7 +856,7 @@ const Game = (() => {
   function saveCheckpoint() {
     if (G.state !== 'play' || G.restoring || G.previewing || G.over) return;
     const P = G.p;
-    G.checkpoint = { version: 1, heat: G.heat, pot: G.pot, runT: G.runT, stats: { ...G.stats, bossT: [...G.stats.bossT] }, player: { hp: P.hp, maxHp: P.maxHp, full: P.full, shield: P.shield, revived: P.revived, wi: P.wi, weps: P.weps.map(w => w ? w.id : null), sides: { ...P.sides }, s: { ...P.s } } };
+    G.checkpoint = { version: 1, heat: G.heat, pot: G.pot, runT: G.runT, stats: { ...G.stats, bossT: [...G.stats.bossT] }, player: { hp: P.hp, maxHp: P.maxHp, full: P.full, shield: P.shield, revived: P.revived, wi: P.wi, weps: P.weps.map(w => w ? w.id : null), temporary: P.weps.map(w => w?.remaining > 0 ? { remaining: w.remaining, restore: w.restore || null } : null), sides: { ...P.sides }, s: { ...P.s } } };
     G.store.set('run8', JSON.stringify(G.checkpoint));
   }
   G.resumeRun = function () {
@@ -796,12 +870,19 @@ const Game = (() => {
       P.full = Number.isFinite(p.full) ? clamp(p.full, 0, 100) : 40;
       P.shield = Number.isFinite(p.shield) ? clamp(Math.floor(p.shield), 0, 2) : 0; P.revived = p.revived === true;
       P.weps = [0, 1].map(i => WEAPON_IDS.includes(p.weps?.[i]) ? { id: p.weps[i] } : i ? null : { id: 'chopbow' });
+      P.weps.forEach((w, i) => {
+        if (!w || !WEAPONS[w.id].duration) return;
+        const temporary = p.temporary?.[i];
+        if (!Number.isFinite(temporary?.remaining) || temporary.remaining <= 0) { P.weps[i] = { id: 'chopbow' }; return; }
+        w.remaining = clamp(temporary.remaining, 0, WEAPONS[w.id].duration);
+        w.restore = WEAPON_IDS.includes(temporary.restore) && !WEAPONS[temporary.restore].duration ? temporary.restore : null;
+      });
       P.wi = p.wi === 1 && P.weps[1] ? 1 : 0;
       for (const key of Object.keys(P.s)) if (Number.isFinite(p.s?.[key])) P.s[key] = clamp(p.s[key], key === 'crit' ? 0 : 0.1, key === 'ultThresh' || key === 'ultCd' ? 100 : key === 'crit' ? 1 : 10);
       for (const id of SIDE_IDS) if (Number.isFinite(p.sides?.[id])) P.sides[id] = clamp(Math.floor(p.sides[id]), 0, SIDES[id].max);
       G.runT = Number.isFinite(save.runT) ? clamp(save.runT, 0, 1000000) : 0;
       for (const key of ['kills', 'rice', 'dmgTaken', 'ults', 'pots', 'weapons']) if (Number.isFinite(save.stats?.[key])) G.stats[key] = clamp(save.stats[key], 0, 10000000);
-      G.stats.bossT = Array.isArray(save.stats?.bossT) ? save.stats.bossT.filter(n => Number.isFinite(n) && n >= 0 && n < 100000).slice(0, 3) : [];
+      G.stats.bossT = Array.isArray(save.stats?.bossT) ? save.stats.bossT.filter(n => Number.isFinite(n) && n >= 0 && n < 100000).slice(0, POTS.length) : [];
       P.inv = 2; G.resumeGrace = 0.2;
     } finally { G.restoring = false; }
     saveCheckpoint(); return true;
@@ -810,7 +891,7 @@ const Game = (() => {
   // ================= 地形 =================
   function makeRice(L) {
     const C = CFG.CELL, n = Math.ceil(CFG.POT_R * 2 / C) + 2;
-    const R = { n, ox: -n * C / 2, oy: -n * C / 2, hp: new Uint8Array(n * n), type: new Uint8Array(n * n), seed: new Float32Array(n * n), total: 0 };
+    const R = { n, ox: -n * C / 2, oy: -n * C / 2, hp: new Uint8Array(n * n), type: new Uint8Array(n * n), seed: new Float32Array(n * n), total: 0, slurped: new Set() };
     const p = [rnd(0, 9), rnd(0, 9), rnd(0, 9), rnd(0, 9), rnd(0, 9)];
     for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
       const cx = R.ox + (i + 0.5) * C, cy = R.oy + (j + 0.5) * C, d = Math.hypot(cx, cy);
@@ -964,7 +1045,7 @@ const Game = (() => {
       full: 40, aimA: -Math.PI / 2, aimD: 200, fireCd: 0, dashCd: 0, dashT: 0, dashDur: 0.3, dx: 1, dy: 0,
       inv: 0, biteT: 0, biteA: 0, eatKick: 0, attackT: 0, swingSide: 1, combo: 0, comboT: 0, walkT: 0, recoil: 0, muzzle: 0, chew: 0, burpT: 0, ultCdT: 0,
       revived: false, slowZone: 1, shield: 0, hurtT: 0, landT: 0, emptyT: 0, swapT: 0, charging: 0, whiskT: 0, blocked: -1, launched: false,
-      weps: [{ id: 'chopbow' }, null], wi: 0, sides: {},
+      weps: [{ id: 'chopbow' }, null], wi: 0, sides: {}, buffs: { clock: 0, magnet: 0, frenzy: 0 }, spoonT: 0, eatTarget: null, slurpT: 0,
       s: { dmg: 1, rate: 1, spd: 1, crit: 0.08, fullGain: 1, costMul: 1, ultCd: 10, ultPow: 1, ultThresh: 60 },
     };
   }
@@ -974,6 +1055,7 @@ const Game = (() => {
     G.stats = { kills: 0, rice: 0, dmgTaken: 0, ults: 0, pots: 0, weapons: 1, bossT: [] };
     G.trauma = 0; G.hitstop = 0; G.slowmo = 1; G.hurtFlash = 0; G.flashWhite = 0; G.fade = 0;
     G.state = 'play';
+    G.tipTimes = {}; G.tip = null; G.weaponInfo = null;
     loadPot(0);
     Sfx.setPaused(false);
   }
@@ -984,12 +1066,21 @@ const Game = (() => {
     G.rice = makeRice(G.L); G.dirty = [];
     G.enemies = []; G.bullets = []; G.ebullets = []; G.pickups = []; G.parts = []; G.texts = []; G.rings = []; G.zones = []; G.impacts = [];
     G.lobs = []; G.elobs = []; G.beams = []; G.swings = []; G.booms = []; G.jets = []; G.lid = null;
+    G.mines = []; G.cheeseLinks = []; G.traces = []; G.panTilt = 0; G.panTiltA = 0;
     G.spawnAcc = 0; G.boss = null; G.mid = null; G.bossSpawned = false; G.midSpawned = false; G.hazardT = 6; G.regrowT = 40;
-    G.cat = null; G.restT = 0; G.near = null; G.banner = null;
+    G.cat = null; G.restT = 0; G.near = null; G.banner = null; G.tip = null; G.terrainT = 14; G.refillRice = null; G.refillNext = 0;
     G.catNear = false; G.target = null; G.interference = null; G.sceneRoll = 0; G.darkness = 0;
     placeObstacles(G.L);
     if (G.L.hazard === 'curry') makeCurry();
+    if (G.L.hazard === 'wind') for (let i = 0; i < 4; i++) {
+      const a = i * TAU / 4 + 0.4;
+      G.zones.push({ kind: 'wind', x: Math.cos(a) * 480, y: Math.sin(a) * 480, r: 155, t: 0, dur: 1e9, seed: i });
+    }
     const P = G.p; P.x = 0; P.y = 0; P.vx = P.vy = 0;
+    if (pot === 0 && !G.previewing) {
+      dropWeapon(-100, 30, 'mochi', 'starter', true);
+      dropWeapon(100, 30, 'strainer', 'starter', true);
+    }
     banner(`第 ${pot + 1} 锅 · ${G.L.name}`, G.L.desc, 2.4);
     Sfx.setBoss(false); Sfx.setPot(pot);
     saveCheckpoint();
@@ -1017,10 +1108,15 @@ const Game = (() => {
     }
   }
   function banner(title, sub, dur) { G.banner = { title, sub, t: 0, dur }; }
+  function hint(key, msg, cooldown = 16, dur = 3) {
+    G.tipTimes ||= {};
+    if (G.tipTimes[key] !== undefined && G.runT - G.tipTimes[key] < cooldown) return;
+    G.tipTimes[key] = G.runT; G.tip = { msg, t: 0, dur };
+  }
   G.addTrauma = a => { G.trauma = Math.min(1, G.trauma + a); };
   function hitstop(s) { G.hitstop = Math.max(G.hitstop, s); }
   function text(x, y, txt, col, size, z, big) { if (G.texts.length >= 60) return null; const item = { x, y, z: z || 30, txt, col: col || '#fff', size: size || 16, life: 0, max: big ? 1.1 : 0.8, vx: rnd(-20, 20), big: !!big }; G.texts.push(item); return item; }
-  function part(o) { if (G.parts.length < 650) G.parts.push(Object.assign(partPool.pop() || {}, { vx: 0, vy: 0, z: 0, vz: 0, life: 0, max: 0.6, size: 3, g: 900, col: '#ffffff', kind: 'dot', drag: 2, home: false }, o)); }
+  function part(o) { if (G.parts.length < 650) G.parts.push(Object.assign(partPool.pop() || {}, { vx: 0, vy: 0, z: 0, vz: 0, life: 0, max: 0.6, size: 3, g: 900, col: '#ffffff', kind: 'dot', drag: 2, home: false, slurp: false }, o)); }
   function burst(x, y, n, cols, spd, opts) {
     for (let i = 0; i < n; i++) {
       const a = rnd(0, TAU), s = rnd(spd * 0.3, spd);
@@ -1041,6 +1137,7 @@ const Game = (() => {
   function biteCell(k, gain) {
     const R = G.rice, P = G.p;
     if (!R.hp[k]) return;
+    const eating = gain;
     R.hp[k]--; G.dirty.push(k);
     const c = cellCenter(k), crust = R.type[k] === 1;
     if (gain && P.full >= 100) gain = false; // 撑到了：只拱开不进肚
@@ -1056,6 +1153,7 @@ const Game = (() => {
     }
     if (!R.hp[k]) {
       G.stats.rice++;
+      if (eating) lastMouthful(k);
       burst(c.x, c.y, 6, crust ? ['#f6c260', '#e09a3a'] : ['#fffdf5', '#efe3c8'], 160, { kind: 'grain' });
       if (gain && crust) { text(c.x, c.y, '香脆锅巴！', '#ffd36b', 15); Sfx.riceGone(true); heal(3); }
       else if (gain && P.combo % 6 === 0) Sfx.riceGone(false);
@@ -1082,6 +1180,17 @@ const Game = (() => {
     burst(c.x, c.y, 5, ['#fffdf5', '#efe3c8'], 220, { kind: 'grain' });
   }
   function heal(n) { const P = G.p; P.hp = Math.min(P.maxHp, P.hp + n); }
+  function lastMouthful(k) {
+    const R = G.rice, i0 = Math.floor(k % R.n / 4) * 4, j0 = Math.floor(Math.floor(k / R.n) / 4) * 4, key = j0 * R.n + i0;
+    if (R.slurped.has(key)) return;
+    for (let j = j0; j < Math.min(R.n, j0 + 4); j++) for (let i = i0; i < Math.min(R.n, i0 + 4); i++) if (R.hp[j * R.n + i]) return;
+    R.slurped.add(key);
+    if (G.p.slurpT > 0) return;
+    G.p.slurpT = 1; G.p.chew = 0.65; G.p.eatKick = 1.4;
+    const c = cellCenter(k);
+    for (let i = 0; i < 12; i++) part({ x: c.x, y: c.y, z: 18, sx: c.x + rnd(-23, 23), sy: c.y + rnd(-23, 23), home: true, slurp: true, size: rnd(2.5, 4), max: rnd(0.35, 0.55), kind: 'grain', arc: i % 2 ? 1 : -1 });
+    hint('slurp', '大吸溜——这一片，吃干净！', 18, 2.5); Sfx.slurp();
+  }
 
   // ================= 玩家 =================
   function hurtPlayer(dmg, fromX, fromY, src) {
@@ -1138,12 +1247,12 @@ const Game = (() => {
     // Bots already produce complete commands; assistance applies to human input only.
     if (cmd.manualFire === undefined) return;
     const P = G.p, W = G.weapon(), w = P.weps[P.wi]; G.target = null;
-    if (!W || G.phase !== 'fight' && G.phase !== 'boss' || G.resumeGrace > 0 || G.over) { cmd.fire = false; cmd.cancelCharge = true; return; }
+    if (!W || G.phase === 'launch' || G.phase === 'drop' || G.resumeGrace > 0 || G.over) { cmd.fire = false; cmd.cancelCharge = true; return; }
     const touch = cmd.touch, auto = Settings.auto(touch), aim = Settings.aim(touch), direct = cmd.manualAim && (touch || !aim);
     const range = W.kind === 'proj' ? W.spd * W.life + 25 : W.kind === 'lob' ? W.maxD : W.kind === 'charge' ? W.len : W.range + 12;
     let best = null, score = Infinity;
     for (const e of G.enemies) {
-      if (e.dead || e.z > 40 || e.state === 'idle') continue;
+      if (e.dead || e.buried || e.z > 40 || e.state === 'idle') continue;
       const dx = e.x - P.x, dy = e.y - P.y, d = Math.hypot(dx, dy);
       if (d > range + e.r || Math.abs(dx) > (G.viewW || 900) * 0.55 || Math.abs(dy) > (G.viewH || 700) * 0.55) continue;
       const angle = Math.atan2(dy, dx), diff = Math.abs(angDiff(cmd.aim ? cmd.aimA : P.aimA, angle));
@@ -1157,12 +1266,23 @@ const Game = (() => {
     if (best && aim && !(touch && cmd.manualAim)) {
       cmd.aim = true; cmd.aimA = Math.atan2(best.y - P.y, best.x - P.x); cmd.aimD = Math.hypot(best.x - P.x, best.y - P.y);
     }
-    const firing = auto && !!best && P.dashT <= 0;
+    const firing = auto && (G.phase === 'fight' || G.phase === 'boss') && P.dashT <= 0;
     cmd.fire = cmd.manualFire || firing;
     cmd.cancelCharge = !cmd.manualFire && !firing;
     if (W.kind === 'charge' && firing && !cmd.manualFire) cmd.fire = (w.charge || 0) < W.charge * 0.97;
   }
   G.assist = assist;
+  function updateRefillGuide() {
+    const P = G.p, W = G.weapon();
+    if (!W?.cost || P.full >= W.cost * P.s.costMul || G.over) { G.refillRice = null; return; }
+    if (G.runT < G.refillNext && G.refillRice && G.rice.hp[G.refillRice.k]) return;
+    G.refillNext = G.runT + 0.6;
+    let nearest = Infinity; G.refillRice = null;
+    for (let k = 0; k < G.rice.hp.length; k++) if (G.rice.hp[k]) {
+      const c = cellCenter(k), dd = dist2(P.x, P.y, c.x, c.y);
+      if (dd < nearest) { nearest = dd; G.refillRice = { ...c, k }; }
+    }
+  }
 
   function clearInterference() {
     G.interference = null; G.sceneRoll = 0; G.darkness = 0;
@@ -1225,6 +1345,19 @@ const Game = (() => {
 
   function updatePlayer(dt, cmd) {
     const P = G.p, S = P.s;
+    for (const id of BUFF_KEYS) P.buffs[id] = Math.max(0, P.buffs[id] - dt);
+    for (let slot = 0; slot < P.weps.length; slot++) {
+      const w = P.weps[slot]; if (!(w?.remaining > 0)) continue;
+      w.remaining -= dt;
+      if (w.remaining <= 0) {
+        P.weps[slot] = w.restore ? { id: w.restore } : null;
+        if (P.wi === slot && !P.weps[slot]) P.wi = 1 - slot;
+        if (!P.weps[P.wi]) P.weps[P.wi] = { id: 'chopbow' };
+        P.fireCd = 0.2; P.charging = 0;
+        hint('vacuum-end', '吸饭勺到点下班，原武器归位！', 0);
+        Sfx.swap();
+      }
+    }
     P.full = Math.max(0, P.full - CFG.DIGEST * dt);
     P.ultCdT = Math.max(0, P.ultCdT - dt);
     P.inv = Math.max(0, P.inv - dt); P.dashCd = Math.max(0, P.dashCd - dt);
@@ -1233,6 +1366,7 @@ const Game = (() => {
     P.burpT = Math.max(0, P.burpT - dt); P.hurtT = Math.max(0, P.hurtT - dt); P.landT = Math.max(0, P.landT - dt);
     P.emptyT = Math.max(0, P.emptyT - dt); P.swapT = Math.max(0, P.swapT - dt); P.whiskT = Math.max(0, P.whiskT - dt);
     P.eatKick = Math.max(0, P.eatKick - dt * 7); P.attackT = Math.max(0, P.attackT - dt);
+    P.slurpT = Math.max(0, P.slurpT - dt);
     P.slowZone = P.z > 4 ? 1 : zoneSlowAt(P.x, P.y);
     const ctl = G.phase !== 'launch' && G.phase !== 'drop';
 
@@ -1270,35 +1404,51 @@ const Game = (() => {
       const acc = 1 - Math.exp(-dt * (mx || my ? 26 : 32) * (P.z > 0 ? 0.6 : 1));
       P.vx = lerp(P.vx, mx * spd, acc); P.vy = lerp(P.vy, my * spd, acc);
     }
-    // 移动 + 米饭碰撞（推着米饭就是在啃；跳得够高可以从饭堆上越过）
+    // 勺子负责够饭，身体在米饭前留出距离。
     let blocked = -1;
-    const r = P.r + 3 * fullF, overRice = P.z > 22;
+    const r = P.r + 3 * fullF, riceR = r + (P.dashT > 0 ? 0 : CFG.SPOON_GAP), overRice = P.z > 22;
     const nx = P.x + P.vx * dt;
-    let k = overRice ? -1 : riceOverlap(nx, P.y, r);
+    let k = overRice ? -1 : riceOverlap(nx, P.y, riceR);
     if (k >= 0) {
       if (P.dashT > 0) { shovel(k); P.x = nx; }
       else { blocked = k; P.vx = 0; }
     } else P.x = nx;
     const ny = P.y + P.vy * dt;
-    k = overRice ? -1 : riceOverlap(P.x, ny, r);
+    k = overRice ? -1 : riceOverlap(P.x, ny, riceR);
     if (k >= 0) {
       if (P.dashT > 0) { shovel(k); P.y = ny; }
       else { if (blocked < 0) blocked = k; P.vy = 0; }
     } else P.y = ny;
-    if (P.dashT <= 0 && P.z <= 0) { const kk = riceOverlap(P.x, P.y, r - 4); if (kk >= 0) { const c = cellCenter(kk); const a = Math.atan2(P.y - c.y, P.x - c.x); P.x += Math.cos(a) * 60 * dt; P.y += Math.sin(a) * 60 * dt; } }
+    if (P.dashT <= 0 && P.z <= 0) { const kk = riceOverlap(P.x, P.y, riceR - 2); if (kk >= 0) { const c = cellCenter(kk); const a = Math.atan2(P.y - c.y, P.x - c.x); P.x += Math.cos(a) * 90 * dt; P.y += Math.sin(a) * 90 * dt; } }
     obsPush(P, r, P.z);
     const d = Math.hypot(P.x, P.y), lim = CFG.POT_R - r - 12;
     if (d > lim) { P.x *= lim / d; P.y *= lim / d; }
-    // 啃米
-    if (blocked >= 0 && Math.hypot(cmd.mx, cmd.my) > 0.3 && P.z <= 0) {
+    // 只有朝饭堆走才挥勺，站在旁边不会自动吃。
+    P.eatTarget = null;
+    if (ctl && P.z <= 0 && P.dashT <= 0 && Math.hypot(cmd.mx, cmd.my) > 0.3 && !cmd.manualFire) {
+      const R = G.rice, C = CFG.CELL, reach = CFG.SPOON_REACH;
+      let best = Infinity;
+      for (let j = Math.max(0, Math.floor((P.y - reach - R.oy) / C)); j <= Math.min(R.n - 1, Math.floor((P.y + reach - R.oy) / C)); j++)
+        for (let i = Math.max(0, Math.floor((P.x - reach - R.ox) / C)); i <= Math.min(R.n - 1, Math.floor((P.x + reach - R.ox) / C)); i++) {
+          const kk = j * R.n + i; if (!R.hp[kk]) continue;
+          const x = clamp(P.x, R.ox + i * C, R.ox + (i + 1) * C), y = clamp(P.y, R.oy + j * C, R.oy + (j + 1) * C);
+          const dx = x - P.x, dy = y - P.y, dd = Math.hypot(dx, dy);
+          if (dd >= best || dd > reach || (dx * cmd.mx + dy * cmd.my) / Math.max(1, dd * Math.hypot(cmd.mx, cmd.my)) < 0.65) continue;
+          const obstruction = bulletObs((P.x + x) * 0.5, (P.y + y) * 0.5, 2, 20); if (obstruction) continue;
+          best = dd; blocked = kk; P.eatTarget = { x, y }; P.biteA = Math.atan2(dy, dx);
+        }
+    }
+    if (P.eatTarget) {
+      P.spoonT += dt;
       P.biteT += dt * (P.full >= 100 ? 0.5 : 1);
-      while (P.biteT >= 0.12) {
-        P.biteT -= 0.12;
-        biteCell(blocked, true);
+      while (P.biteT >= 0.36) {
+        P.biteT -= 0.36;
+        for (let mouthful = 0; mouthful < 3 && G.rice.hp[blocked]; mouthful++) biteCell(blocked, true);
         if (!G.rice.hp[blocked]) break;
       }
-    } else P.biteT = 0;
-    P.blocked = blocked;
+      if (P.combo >= 8) hint('rice-combo', '米饭加油站，越吃越有劲！', 24);
+    } else { P.biteT = 0; P.spoonT = 0; }
+    P.blocked = P.eatTarget ? blocked : -1;
     const moving = Math.hypot(P.vx, P.vy);
     P.walkT += dt * (4 + moving * 0.05) * (blocked >= 0 ? 2.2 : 1);
     if (moving > 40 && P.z <= 0 && Math.random() < dt * 8 && P.dashT <= 0) part({ x: P.x + rnd(-5, 5), y: P.y + 4, z: 1, vx: -P.vx * 0.1, vy: -P.vy * 0.1, vz: 30, size: rnd(2, 4), max: 0.35, kind: 'puff', g: 0 });
@@ -1311,6 +1461,7 @@ const Game = (() => {
     updateNear();
     if (cmd.use && G.near) takeWeapon(G.near);
     else if (cmd.use && G.catNear) startLaunch();
+    if (G.state !== 'play') return;
     // 开火
     if (P.dashT <= 0) updateWeapon(dt, cmd); else { const w = P.weps[P.wi]; if (w) w.charge = 0; P.charging = 0; }
     // 饱嗝大招
@@ -1339,18 +1490,25 @@ const Game = (() => {
     G.catNear = !!G.cat && G.phase === 'rest' && G.cat.state === 'idle' && dist2(P.x, P.y, G.cat.x, G.cat.y) < 115 ** 2;
   }
   function takeWeapon(u) {
+    if (u.got || !WEAPONS[u.wid]) return;
     const P = G.p;
     const slot = P.weps[1] === null ? 1 : P.wi;
     const old = P.weps[slot];
-    P.weps[slot] = { id: u.wid }; P.wi = slot; P.fireCd = 0.15; P.swapT = 0.35;
-    u.got = true;
-    if (old) G.pickups.push({ kind: 'weapon', wid: old.id, x: P.x + rnd(-10, 10), y: P.y + rnd(-10, 10), z: 10, vz: 220, vx: rnd(-60, 60), vy: rnd(-60, 60), t: 0 });
-    if (u.group) for (const o of G.pickups) if (o !== u && o.group === u.group) { o.got = true; burst(o.x, o.y, 10, ['#ffffff', '#ffe9a0'], 160, { kind: 'puff', g: -40 }); }
+    if (old?.held) releaseSticky(old, false);
     const W = WEAPONS[u.wid];
+    P.weps[slot] = W.duration ? { id: u.wid, remaining: W.duration, restore: old ? (WEAPONS[old.id].duration ? old.restore : old.id) : null } : { id: u.wid };
+    P.wi = slot; P.fireCd = 0.15; P.swapT = 0.35;
+    u.got = true;
+    const oldId = old && (WEAPONS[old.id].duration ? old.restore : old.id);
+    if (oldId && !W.duration) dropWeapon(P.x, P.y, oldId);
+    if (u.group) for (const o of G.pickups) if (o !== u && o.group === u.group) { o.got = true; burst(o.x, o.y, 10, ['#ffffff', '#ffe9a0'], 160, { kind: 'puff', g: -40 }); }
     G.stats.weapons++;
     text(P.x, P.y, '拿到 ' + W.name + '！', RARITY[W.rar].col, 20, 64, true);
     Sfx.pickWeapon(W.rar);
     sparks(P.x, P.y, 30, 16, RARITY[W.rar].col, 260);
+    G.weaponInfo = { id: u.wid, t: 0 }; G.state = 'weapon'; P.charging = 0;
+    for (const w of P.weps) if (w) w.charge = 0;
+    Sfx.setPaused(true);
   }
   G.takeWeapon = takeWeapon;
   function updateWeapon(dt, cmd) {
@@ -1358,10 +1516,16 @@ const Game = (() => {
     const W = WEAPONS[w.id], cost = W.cost * P.s.costMul;
     if (cmd.cancelCharge) { w.charge = 0; P.charging = 0; }
     P.fireCd -= dt;
+    if (w.catchT > 0) {
+      w.catchT -= dt;
+      collectShots(W, w);
+      if (w.catchT <= 0 || !cmd.fire && w.catchT < 0.4) fireCollected(W, w);
+      return;
+    }
     if (W.kind === 'charge') {
       if (cmd.fire && P.full >= cost) {
         if (!w.charge) Sfx.chargeStart();
-        w.charge = Math.min(W.charge, (w.charge || 0) + dt * P.s.rate); P.charging = w.charge / W.charge;
+        w.charge = Math.min(W.charge, (w.charge || 0) + dt * P.s.rate * (P.buffs.frenzy > 0 ? 1.5 : 1)); P.charging = w.charge / W.charge;
       } else if (w.charge > 0) {
         if (w.charge > 0.12 && P.fireCd <= 0) { P.full = Math.max(0, P.full - cost); fireBeam(W, w.charge / W.charge); P.fireCd = W.cd; }
         w.charge = 0; P.charging = 0;
@@ -1372,7 +1536,7 @@ const Game = (() => {
     if (!cmd.fire || P.fireCd > 0) return;
     if (cost > 0 && P.full < cost) { emptyGun(); P.fireCd = 0.25; return; }
     P.full = Math.max(0, P.full - cost);
-    let cd = W.cd / P.s.rate; if (W.spin) cd *= lerp(2.6, 1, w.spin);
+    let cd = W.cd / (P.s.rate * (P.buffs.frenzy > 0 ? 1.5 : 1)); if (W.spin) cd *= lerp(2.6, 1, w.spin);
     P.fireCd = cd;
     fire(W, w);
   }
@@ -1380,13 +1544,15 @@ const Game = (() => {
     const P = G.p;
     if (P.emptyT > 0) return;
     P.emptyT = 1; Sfx.empty();
-    text(P.x, P.y, '空', '#ffd6a0', 14, 58);
+    text(P.x, P.y, '饭力不足', '#ffd6a0', 14, 58);
+    hint('empty', '没饭力啦！朝米饭走，挥勺补弹。', 6, 4);
   }
-  const dmgOf = base => base * G.p.s.dmg * (1 + 0.35 * G.p.full / 100);
+  const dmgOf = base => base * G.p.s.dmg * (1 + 0.35 * G.p.full / 100) * (G.p.buffs.frenzy > 0 ? 1.25 : 1);
   function muzzlePoint(P, id) {
     const front = (10 + WEAPON_MUZZLE[id] * 1.5) * 1.13, side = 12.5 * 1.13;
     const dx = Math.cos(P.aimA) * front + Math.sin(P.aimA) * side, dy = Math.sin(P.aimA) * front - Math.cos(P.aimA) * side, length = Math.hypot(dx, dy);
     let t = 1;
+    if (id === 'vacuum') for (let d = 4; d <= length; d += 4) if (G.riceAt(P.x + dx * d / length, P.y + dy * d / length)) { t = Math.max(0, (d - 4) / length); break; }
     for (const o of G.obs) {
       if (o.dead || o.h < 22) continue;
       const ox = o.x - P.x, oy = o.y - P.y, along = (ox * dx + oy * dy) / length, perpendicular = ox * ox + oy * oy - along * along, radius = o.r + 4;
@@ -1407,6 +1573,30 @@ const Game = (() => {
     P.recoil = W.kind === 'melee' ? 0 : 3; P.muzzle = 0.06;
     P.attackT = W.kind === 'melee' ? 0.26 : 0.15;
     Sfx.weapon(w.id);
+    if (W.kind === 'sticky') {
+      P.attackT = 0.36;
+      G.swings.push({ x: P.x, y: P.y, a: a0, arc: W.arc, r: W.range, t: 0, dur: 0.28, kind: 'pan', side: 1 });
+      if (w.held && !w.held.dead) { releaseSticky(w, true); return; }
+      let target = null, nearest = W.range;
+      for (const e of G.enemies) {
+        if (e.dead || e.buried || e.z > 40 || e.state === 'idle') continue;
+        const dd = Math.hypot(e.x - P.x, e.y - P.y);
+        if (dd - e.r < nearest && Math.abs(angDiff(a0, Math.atan2(e.y - P.y, e.x - P.x))) < W.arc / 2) { target = e; nearest = dd - e.r; }
+      }
+      if (target) {
+        damageEnemy(target, dmgOf(W.dmg * 0.22), P.x, P.y, 0, false, 'mochi');
+        if (target.type === 'boss') { target.tetherT = 0.65; target.slowT = Math.max(target.slowT, 0.65); }
+        else if (!target.dead) { w.held = target; w.holdT = 3.2; target.heldBy = w; target.vx = target.vy = 0; hint('mochi', '黏住啦！再挥一次，把它甩进怪群。', 12); }
+      }
+      for (const o of G.obs) if (!o.dead && o.hp && dist2(P.x, P.y, o.x, o.y) < (W.range + o.r) ** 2 && Math.abs(angDiff(a0, Math.atan2(o.y - P.y, o.x - P.x))) < 0.8) damageObs(o, W.dmg);
+      return;
+    }
+    if (W.kind === 'catch') { w.catchT = 0.52; w.caught = 0; w.catchVisual = 0; collectShots(W, w); return; }
+    if (W.kind === 'mine') {
+      const dd = clamp(P.aimD || 160, 75, W.range);
+      if (G.mines.length >= 12) G.mines[0].done = true;
+      G.mines.push({ x: ox, y: oy, z, sx: ox, sy: oy, tx: P.x + Math.cos(a0) * dd, ty: P.y + Math.sin(a0) * dd, t: 0, st: 0, state: 'fly', dmg: dmgOf(W.dmg), r: W.boom }); return;
+    }
     if (W.kind === 'proj') {
       const n = W.n || 1;
       for (let i = 0; i < n; i++) {
@@ -1415,7 +1605,7 @@ const Game = (() => {
         if (n > 1) a += (i / (n - 1) - 0.5) * W.spread + rnd(-0.04, 0.04);
         else if (W.spread) a += rnd(-W.spread / 2, W.spread / 2);
         const sp = W.spd * (n > 1 ? rnd(0.85, 1.1) : 1);
-        addBullet({ x: ox, y: oy, z, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, a, dmg: dmgOf(W.dmg), r: W.r, life: W.life * (n > 1 ? rnd(0.85, 1.1) : 1), max: W.life, pierce: W.pierce || 0, vis: W.vis, kb: W.kb || 140, slow: W.slow, burn: W.burn, bounce: W.bounce || 0, split: W.split, flatten: W.flatten, spin: 0 });
+        addBullet({ x: ox, y: oy, z, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, a, dmg: dmgOf(W.dmg), r: W.r, life: W.life * (n > 1 ? rnd(0.85, 1.1) : 1), max: W.life, pierce: W.pierce || 0, vis: W.vis, kb: W.kb || 140, slow: W.slow, burn: W.burn, bounce: W.bounce || 0, chain: W.chain || 0, harvest: !!W.harvest, boomerang: !!W.boomerang, cheese: W.cheese || 0, freeze: W.freeze || 0, split: W.split, flatten: W.flatten, spin: 0 });
       }
       if (W.vis === 'flame') { P.recoil = 1; }
     } else if (W.kind === 'melee') {
@@ -1467,6 +1657,110 @@ const Game = (() => {
       G.addTrauma(0.35); hitstop(0.04);
       for (let i = 0; i < 18; i++) { const a = a0 + rnd(-W.arc / 2, W.arc / 2), s = rnd(300, 620); part({ x: ox, y: oy, z: 18, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: rnd(20, 120), g: -40, size: rnd(6, 12), max: rnd(0.35, 0.6), kind: 'puff', drag: 3 }); }
     }
+  }
+  function throwIngredient(e, a, speed = 650, dmg = 30) {
+    if (e.dead || e.type === 'boss') return;
+    e.heldBy = null; e.buried = false; e.freezeT = 0;
+    e.thrown = { t: 0.8, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, dmg, hit: [] };
+    e.z = Math.max(18, e.z); e.stunT = 0.9; e.state = 'walk';
+  }
+  function releaseSticky(w, fling) {
+    const e = w.held; w.held = null; w.holdT = 0;
+    if (!e) return;
+    e.heldBy = null; e.z = 0; e.stunT = 0.5;
+    if (fling && !e.dead) {
+      throwIngredient(e, G.p.aimA, 720, dmgOf(36));
+      sparks(e.x, e.y, 25, 10, '#fff0e1', 260); Sfx.stickySnap(); G.addTrauma(0.16);
+    }
+  }
+  function collectShots(W, w) {
+    const P = G.p;
+    for (const b of G.ebullets) {
+      if (b.life <= 0 || w.caught >= 12 || dist2(P.x, P.y, b.x, b.y) > W.range ** 2 || Math.abs(angDiff(P.aimA, Math.atan2(b.y - P.y, b.x - P.x))) > W.arc / 2) continue;
+      b.life = 0; w.caught++; w.catchVisual = 1; P.recoil = -1;
+      sparks(b.x, b.y, 20, 3, '#fff7cb', 100); Sfx.clink();
+    }
+  }
+  function fireCollected(W, w) {
+    const P = G.p, p = muzzlePoint(P, 'strainer'), n = w.caught || 0, a = P.aimA;
+    addBullet({ x: p.x, y: p.y, z: p.z, vx: Math.cos(a) * 660, vy: Math.sin(a) * 660, a, dmg: dmgOf(W.dmg + n * 7), r: 10 + n * 0.8, life: 1.15, max: 1.15, pierce: Math.min(4, 1 + Math.floor(n / 3)), vis: 'meatball', kb: 460, spin: 0 });
+    P.fireCd = W.cd; P.recoil = 4 + n * 0.12; P.attackT = 0.35; P.muzzle = 0.08; w.catchT = 0; w.caught = 0; w.catchVisual = 0;
+    Sfx.panHit(); G.addTrauma(0.15 + n * 0.01);
+    if (n) hint('strainer', `接住 ${n} 发！这一勺还给你。`, 10);
+  }
+  function cheeseLink(e) {
+    e.cheeseT = 4.5;
+    if (G.cheeseLinks.length >= 6) return;
+    let other = null, nearest = 165 ** 2;
+    const degree = a => G.cheeseLinks.reduce((n, l) => n + (l.a === a || l.b === a ? 1 : 0), 0);
+    if (degree(e) >= 2) return;
+    for (const a of G.enemies) {
+      if (a === e || a.dead || a.buried || !(a.cheeseT > 0) || degree(a) >= 2 || G.cheeseLinks.some(l => l.a === e && l.b === a || l.b === e && l.a === a)) continue;
+      const dd = dist2(e.x, e.y, a.x, a.y); if (dd < nearest) { nearest = dd; other = a; }
+    }
+    if (other) G.cheeseLinks.push({ a: e, b: other, t: 0, max: 4.5 });
+  }
+  function trace(kind, x, y, r = 30) {
+    if (G.traces.length >= 24) G.traces.shift();
+    G.traces.push({ kind, x, y, r, t: 0, dur: kind === 'scorch' ? 5 : 2.5 });
+  }
+  function updateKitchen(dt) {
+    const P = G.p;
+    for (const w of P.weps) {
+      if (!w?.held) continue;
+      if (w !== P.weps[P.wi] || w.held.dead || G.over || G.phase === 'launch' || G.phase === 'drop') { releaseSticky(w, false); continue; }
+      w.holdT -= dt;
+      const e = w.held, a = P.aimA;
+      e.x = P.x + Math.cos(a) * 65; e.y = P.y + Math.sin(a) * 65; e.z = P.z + 28 + Math.sin(G.real * 16) * 6;
+      if (w.holdT <= 0) releaseSticky(w, true);
+    }
+    for (const l of G.cheeseLinks) {
+      l.t += dt;
+      if (l.a.dead || l.b.dead || l.a.cheeseT <= 0 || l.b.cheeseT <= 0 || l.a.heldBy || l.b.heldBy) { l.t = l.max; continue; }
+      const dx = l.b.x - l.a.x, dy = l.b.y - l.a.y, d = Math.hypot(dx, dy) || 1;
+      if (d > 240) { l.t = l.max; sparks((l.a.x + l.b.x) / 2, (l.a.y + l.b.y) / 2, 20, 4, '#ffe78a', 100); continue; }
+      const pull = clamp(d - 70, 0, 170) * 11 * dt;
+      for (const [e, sign] of [[l.a, 1], [l.b, -1]]) { const mass = e.type === 'boss' ? 0.04 : 1; e.vx += dx / d * pull * sign * mass; e.vy += dy / d * pull * sign * mass; }
+    }
+    compact(G.cheeseLinks, l => l.t < l.max);
+    for (const m of G.mines) {
+      if (m.done) continue;
+      m.t += dt; m.st += dt;
+      if (m.state === 'fly') {
+        const k = Math.min(1, m.st / 0.38); m.x = lerp(m.sx, m.tx, k); m.y = lerp(m.sy, m.ty, k); m.z = 5 + Math.sin(k * Math.PI) * 80;
+        if (k >= 1) { m.state = 'armed'; m.st = 0; m.z = 2; }
+      } else if (m.state === 'armed' && m.st > 0.25) {
+        if (G.enemies.some(e => !e.dead && !e.buried && e.z < 25 && dist2(e.x, e.y, m.x, m.y) < (e.r + 28) ** 2)) { m.state = 'flip'; m.st = 0; Sfx.sizzle(); }
+      } else if (m.state === 'flip') {
+        m.z = Math.sin(Math.min(1, m.st / 0.26) * Math.PI) * 42;
+        if (m.st >= 0.26) {
+          m.done = true; trace('scorch', m.x, m.y, 45); Sfx.fry();
+          explode(m.x, m.y, m.r, m.dmg, 'player');
+          for (const e of G.enemies) if (!e.dead && dist2(e.x, e.y, m.x, m.y) < (m.r + e.r) ** 2) { e.stunT = Math.max(e.stunT, 0.8); throwIngredient(e, Math.atan2(e.y - m.y, e.x - m.x), 430, 18); }
+        }
+      }
+      if (m.t > 10) m.done = true;
+    }
+    compact(G.mines, m => !m.done);
+    for (const mark of G.traces) mark.t += dt;
+    compact(G.traces, mark => mark.t < mark.dur);
+  }
+  function stepThrown(e, dt) {
+    const b = e.thrown; b.t -= dt;
+    e.x += b.vx * dt; e.y += b.vy * dt; e.z = Math.max(0, e.z - dt * 35);
+    for (const other of G.enemies) {
+      if (other === e || other.dead || other.buried || other.heldBy || other.z > 45 || b.hit.includes(other)) continue;
+      if (dist2(e.x, e.y, other.x, other.y) > (e.r + other.r) ** 2) continue;
+      b.hit.push(other); damageEnemy(other, b.dmg, e.x - b.vx * 0.03, e.y - b.vy * 0.03, 420, false, 'mochi');
+      other.stunT = Math.max(other.stunT, other.type === 'boss' ? 0.15 : 0.8);
+      G.rings.push({ x: other.x, y: other.y, r: 7, max: 38, life: 0, dur: 0.2, col: '#ffe2a4', w: 5 });
+      if (b.hit.length >= 4) b.t = 0;
+    }
+    const ob = obsPush(e, e.r, e.z);
+    if (ob) { if (ob.o.hp) damageObs(ob.o, 30); b.t = 0; }
+    const d = Math.hypot(e.x, e.y), lim = CFG.POT_R - e.r - 12;
+    if (d > lim) { e.x *= lim / d; e.y *= lim / d; b.t = 0; }
+    if (b.t <= 0) { e.thrown = null; e.z = 0; e.vx = e.vy = 0; e.stunT = 0.75; }
   }
   function fireBeam(W, k) {
     const P = G.p, muzzle = muzzlePoint(P, 'sushi'), aimD = Math.max(70, P.aimD || 200), a = Math.atan2(P.y + Math.sin(P.aimA) * aimD - muzzle.y, P.x + Math.cos(P.aimA) * aimD - muzzle.x), w = 10 + 16 * k, dmg = dmgOf(lerp(W.dmg, W.dmgMax, k * k));
@@ -1549,14 +1843,14 @@ const Game = (() => {
   function dropSide(x, y, sid) {
     const P = G.p;
     if (!sid) {
-      const pool = SIDE_IDS.filter(id => id === 'ham' || (P.sides[id] || 0) < SIDES[id].max);
+      const pool = SIDE_IDS.filter(id => id === 'ham' || SIDES[id].consumable || (P.sides[id] || 0) < SIDES[id].max);
       sid = P.hp < P.maxHp * 0.5 && Math.random() < 0.6 ? 'ham' : pick(pool);
     }
     G.pickups.push({ kind: 'side', sid, x, y, z: 10, vz: 260, vx: rnd(-50, 50), vy: rnd(-50, 50), t: 0 });
   }
   function eatSide(sid) {
     const P = G.p, S = P.s, d = SIDES[sid];
-    if (sid !== 'ham') P.sides[sid] = (P.sides[sid] || 0) + 1;
+    if (sid !== 'ham' && !d.consumable) P.sides[sid] = Math.min(d.max, (P.sides[sid] || 0) + 1);
     if (sid === 'ham') heal(25);
     else if (sid === 'nori') P.shield = Math.min(2, P.shield + 1);
     else if (sid === 'pea') S.spd *= 1.07;
@@ -1566,10 +1860,16 @@ const Game = (() => {
     else if (sid === 'ume') S.crit += 0.07;
     else if (sid === 'corn') { S.fullGain *= 1.25; S.costMul *= 0.9; }
     else if (sid === 'yolk') { S.ultCd -= 2; S.ultPow *= 1.2; }
+    else if (sid === 'clock') { P.buffs.clock = Math.max(P.buffs.clock, 7); hint('clock', '子弹时间！这一锅，只有你快。', 0, 3); }
+    else if (sid === 'magnet') { P.buffs.magnet = Math.max(P.buffs.magnet, 10); hint('magnet', '饭力与配菜，统统到碗里来！', 0, 3); }
+    else if (sid === 'frenzy') { P.buffs.frenzy = Math.max(P.buffs.frenzy, 8); hint('frenzy', '爆辣 8 秒，火力全开！', 0, 3); }
+    else if (sid === 'feast') { P.full = Math.min(100, P.full + 35); heal(15); hint('feast', '加饭成功，继续开吃！', 0, 2.5); }
     text(P.x, P.y, d.name, d.col, 16, 60, true);
     Sfx.pickSide();
     burst(P.x, P.y, 14, [d.col, '#ffffff'], 200, { kind: 'chunk' });
   }
+  G.eatSide = eatSide;
+  G.dropSide = dropSide;
 
   // ================= 敌人 =================
   const BASE = {
@@ -1578,6 +1878,11 @@ const Game = (() => {
     radish: { r: 14, hp: 30, spd: 70, dmg: 12 },
     egg: { r: 16, hp: 34, spd: 58, dmg: 10 },
     chili: { r: 13, hp: 22, spd: 75, dmg: 12 },
+    garlic: { r: 13, hp: 32, spd: 88, dmg: 7 },
+    mushroom: { r: 23, hp: 60, spd: 53, dmg: 8 },
+    shrimp: { r: 15, hp: 40, spd: 68, dmg: 10 },
+    carrier: { r: 24, hp: 80, spd: 42, dmg: 8 },
+    youtiao: { r: 20, hp: 66, spd: 78, dmg: 11 },
   };
   const BOSS = {
     general: { r: 54, spd: 62, dmg: 18 },
@@ -1585,6 +1890,7 @@ const Game = (() => {
     cooker: { r: 60, spd: 46, dmg: 20 },
     eggqueen: { r: 58, spd: 72, dmg: 16, mid: 650 },
     porkking: { r: 56, spd: 56, dmg: 20, mid: 800 },
+    fryer: { r: 73, spd: 55, dmg: 21 },
   };
   const hpMul = () => G.L.hpMul * (1 + G.t / 60 * 0.45);
   function spawnEnemy(type, x, y, bossKind) {
@@ -1597,6 +1903,7 @@ const Game = (() => {
     };
     if (type !== 'boss' && G.t > G.L.wave * 0.4 && Math.random() < 0.035 * G.L.elite) { e.elite = true; e.hp *= 3; e.r *= 1.3; }
     e.maxHp = e.hp;
+    if (type === 'carrier') e.bagHp = 30 * G.L.hpMul;
     G.enemies.push(e);
     return e;
   }
@@ -1694,12 +2001,21 @@ const Game = (() => {
         if (circleRect(G.p.x, G.p.y, G.p.r + 4, cx - C / 2, cy - C / 2, C, C)) continue;
         if (G.obs.some(o => !o.dead && dist2(cx, cy, o.x, o.y) < (o.r + C) ** 2) || G.haz.some(h => dist2(cx, cy, h.x, h.y) < (h.r + C) ** 2)) continue;
         R.hp[k] = CFG.RICE_HP; R.type[k] = 0; G.dirty.push(k);
+        R.slurped.delete(Math.floor(j / 4) * 4 * R.n + Math.floor(i / 4) * 4);
       }
   }
   // 关卡机关
   function updateHazards(dt) {
     const P = G.p, fight = G.phase === 'fight' || G.phase === 'boss';
     if (fight) regrow(dt);
+    if (fight && G.L.terrainPulse) {
+      G.terrainT -= dt;
+      if (G.terrainT <= 0) {
+        G.terrainT = 16;
+        const a = Math.atan2(P.y, P.x) + Math.PI * 0.45;
+        G.zones.push({ kind: 'riseWarn', x: Math.cos(a) * 400, y: Math.sin(a) * 400, a, r: 140, t: 0, dur: 1.8 });
+      }
+    }
     if (fight && G.L.hazard === 'oil') {
       G.hazardT -= dt;
       if (G.hazardT <= 0) {
@@ -1746,6 +2062,12 @@ const Game = (() => {
     }
     for (const z of G.zones) {
       z.t += dt;
+      if (z.kind === 'wind' && fight && P.z < 8 && P.dashT <= 0 && dist2(P.x, P.y, z.x, z.y) < z.r * z.r) {
+        const a = Math.atan2(P.y - z.y, P.x - z.x) + Math.PI / 2;
+        const nx = P.x + Math.cos(a) * 85 * dt, ny = P.y + Math.sin(a) * 85 * dt;
+        if (riceOverlap(nx, ny, P.r + CFG.SPOON_GAP) < 0) { P.x = nx; P.y = ny; obsPush(P, P.r, P.z); }
+        hint('wind', '海苔转圈圈，跳起来就能脱身！', 20);
+      }
       if (z.kind === 'riseWarn' && z.t >= z.dur && !z.done) { z.done = true; raiseWall(z); }
       if (z.kind === 'oilWarn' && z.t >= z.dur && !z.done) {
         z.done = true;
@@ -1770,14 +2092,34 @@ const Game = (() => {
     egg: ['#ffffff', '#ffd24a', '#f0ece2'], chili: ['#e8322a', '#ff6a3a', '#3e8a2a'],
     general: ['#ffffff', '#1f2a24', '#e94b4b', '#ffd34d'], eggqueen: ['#ffffff', '#ffc21a', '#ffe9a0'], porkking: ['#8a3b1a', '#c8693a', '#fff0d8'],
     spatula: ['#c8ccd2', '#8a5a30', '#ffe08a'], cooker: ['#d8dde2', '#3a3a40', '#ff5a3a', '#b4621a'],
+    garlic: ['#fff3dc', '#d7c3ad'], mushroom: ['#a35c3d', '#e5be89'], shrimp: ['#ff9f92', '#ffe0d0'], carrier: ['#fff6da', '#ad9063'], youtiao: ['#ffc66e', '#ba6b2d'], fryer: ['#b6dce5', '#ffe5a6', '#617b87'],
   };
   function damageEnemy(e, dmg, fx, fy, kb, quiet, style) {
-    if (e.dead || e.state === 'idle') return;
+    if (e.dead || e.state === 'idle' || e.buried) return;
+    const heavy = dmg >= 22 || kb >= 350;
+    if (e.kind === 'mushroom' && !(e.capFlipT > 0) && e.state !== 'capUp') {
+      const attackA = Math.atan2(fy - e.y, fx - e.x);
+      if (Math.abs(angDiff(e.aimA || 0, attackA)) < 1.2) {
+        if (heavy) { e.capFlipT = 1.7; e.stunT = 0.35; Sfx.clink(); }
+        else { dmg *= 0.12; Sfx.clink(); }
+      }
+    }
+    if (e.freezeT > 0 && heavy) {
+      e.freezeT = 0; e.iceCrackT = 0.35; dmg *= 1.65;
+      burst(e.x, e.y, 14, ['#bcefff', '#eefaff', '#7bcaee'], 280, { kind: 'chunk' }); Sfx.iceCrack();
+      throwIngredient(e, Math.atan2(e.y - fy, e.x - fx), 520, dmg * 0.55);
+    }
     if (e.state === 'tired' || e.state === 'stuck') dmg *= 1.5;
     if (e.state === 'open') dmg *= 2;
     const crit = Math.random() < G.p.s.crit + (G.p.full < 15 ? 0.1 : 0);
     if (crit) dmg *= 2;
+    if (e.armor > 0) { const absorb = Math.min(e.armor, dmg * 0.75); e.armor -= absorb; dmg -= absorb; }
     e.hp -= dmg; e.flash = 0.07; e.squash = Math.max(e.squash, 0.8); e.hitT = 0.3;
+    if (e.kind === 'carrier' && e.bagHp > 0) {
+      e.bagHp -= dmg;
+      if (e.bagHp <= 0) { fillRice(e.x, e.y, 68); hint('bag', '饭袋破啦！护甲补给变成你的加餐。', 12); }
+    }
+    if (heavy && !(e.traceT > 0)) { trace('dent', e.x, e.y, Math.min(45, e.r + 12)); e.traceT = 0.3; }
     const a = Math.atan2(e.y - fy, e.x - fx);
     if (!e.lastImpact || G.real - e.lastImpact > 0.065) {
       impactAt(e.x - Math.cos(a) * e.r * 0.65, e.y - Math.sin(a) * e.r * 0.65, Math.max(16, e.z + e.r * 0.8), style || G.weapon()?.vis || 'grain', Math.min(45, 20 + dmg * 0.3), a);
@@ -1790,16 +2132,26 @@ const Game = (() => {
       if (old && old.life < 0.14 && old.total !== undefined) { old.total += dmg; old.crit ||= crit; old.txt = (old.crit ? '暴击 ' : '') + Math.round(old.total); old.col = old.crit ? '#ffdd33' : '#fff'; old.size = old.crit ? 22 : 15; }
       else { e.damageText = text(e.x + rnd(-8, 8), e.y, (crit ? '暴击 ' : '') + Math.round(dmg), crit ? '#ffdd33' : '#fff', crit ? 22 : 15, e.r * 2 + 10, crit); if (e.damageText) { e.damageText.total = dmg; e.damageText.crit = crit; } }
     }
-    if (!quiet) { Sfx.hit(); sparks(e.x, e.y, 18, 3, '#fff6c8', 200); burst(e.x, e.y, 2, PALETTE[e.kind] || ['#ffffff'], 160, { kind: 'chunk' }); }
+    if (!quiet) { Sfx.hit(); sparks(e.x, e.y, 18, 3, '#fff6c8', 200); burst(e.x, e.y, e.kind === 'oni' ? 5 : 2, PALETTE[e.kind] || ['#ffffff'], 160, { kind: e.kind === 'oni' || e.kind === 'carrier' ? 'grain' : 'chunk' }); }
     // 打 BOSS 会把它身上的饭粒打下来（饭力补给，BOSS 战里也能续上弹药）
     if (e.type === 'boss' && e.hp > 0) {
       e.spill = (e.spill || 0) + dmg;
       while (e.spill >= 55) { e.spill -= 55; G.pickups.push({ kind: 'orb', x: e.x + rnd(-20, 20), y: e.y + rnd(-20, 20), z: 30, vz: rnd(200, 320), vx: rnd(-160, 160), vy: rnd(-160, 160), t: 0 }); }
     }
     if (e.hp <= 0) killEnemy(e);
+    else if (e.kind === 'youtiao' && !e.half && heavy && G.enemies.length < 44) {
+      const halfHp = e.hp * 0.5, fullMax = e.maxHp, a = Math.atan2(e.y - fy, e.x - fx) + Math.PI / 2;
+      e.half = true; e.r = 11; e.hp = halfHp; e.maxHp = fullMax * 0.5; e.mergeT = 3.5;
+      const mate = spawnEnemy('youtiao', e.x + Math.cos(a) * 30, e.y + Math.sin(a) * 30);
+      Object.assign(mate, { half: true, r: 11, hp: halfHp, maxHp: fullMax * 0.5, mergeT: 3.5, z: 0, state: 'walk', pair: e, stunT: 0.35 }); e.pair = mate; e.stunT = 0.35;
+      e.vx -= Math.cos(a) * 240; e.vy -= Math.sin(a) * 240; mate.vx = Math.cos(a) * 240; mate.vy = Math.sin(a) * 240;
+      hint('youtiao', '油条散开了，别让它们重新贴贴！', 20);
+    } else if (e.kind === 'youtiao' && e.half && heavy) e.mergeT = Math.max(e.mergeT || 0, 2);
   }
   G.damageEnemy = damageEnemy;
   function killEnemy(e) {
+    if (e.heldBy) { e.heldBy.held = null; e.heldBy = null; }
+    if (e.kind === 'carrier' && e.bagHp > 0) { fillRice(e.x, e.y, 68); e.bagHp = 0; }
     e.dead = true; G.stats.kills++;
     const boss = e.type === 'boss' && !e.mid;
     burst(e.x, e.y, boss ? 80 : e.mid ? 50 : 16, PALETTE[e.kind], boss ? 600 : 300, { kind: 'chunk' });
@@ -1824,7 +2176,7 @@ const Game = (() => {
   // BOSS 被吃掉：清场 → 饭后时间（挑武器）→ 弹射勺
   function bossDown(e) {
     clearInterference();
-    G.boss = null; G.slowmo = 0.25; G.lid = null; G.jets = [];
+    G.boss = null; G.slowmo = 0.25; G.lid = null; G.jets = []; G.panTilt = 0;
     G.stats.pots++; G.stats.bossT.push(Math.round(G.t - G.bossAt));
     for (const o of G.enemies) if (!o.dead) { o.noDrop = true; killEnemy(o); }
     G.ebullets = []; G.elobs = [];
@@ -1834,6 +2186,7 @@ const Game = (() => {
     const P = G.p, hp0 = P.hp; heal(P.maxHp * 0.3); if (P.hp > hp0) text(P.x, P.y, `+${Math.round(P.hp - hp0)}`, '#9dffb0', 18, 60, true);
     Sfx.win(); Sfx.setBoss(false);
     banner('吃掉了！', '饭后时间：挑一把武器，然后去弹射勺那里', 3);
+    hint('clear-' + G.pot, '本锅通关！前往金色弹射勺，进入下一锅。', 0, 6);
   }
   function setupRest() {
     G.restSpawned = true;
@@ -1842,7 +2195,8 @@ const Game = (() => {
     const base = Math.atan2(-P.y, -P.x);
     const ids = [];
     for (let i = 0; i < 3; i++) {
-      let id = rollWeapon(1, i === 0 ? 2 : 1), guard = 0;
+      const showcases = [['mochi', 'strainer', 'vacuum'], ['nori', 'soda', 'ricochet'], ['cheese', 'gyoza', 'steamer']];
+      let id = showcases[G.pot % showcases.length][i], guard = 0;
       while (ids.includes(id) && guard++ < 10) id = rollWeapon(1, 1);
       ids.push(id);
       const a = base + (i - 1) * 0.75, x = P.x + Math.cos(a) * 130, y = P.y + Math.sin(a) * 130;
@@ -1902,10 +2256,100 @@ const Game = (() => {
     }
   }
 
-  function updateEnemies(dt) {
+  function stepFoodEnemy(e, dt) {
+    if (!FOOD_ENEMIES.has(e.kind)) return false;
+    const P = G.p, dx = P.x - e.x, dy = P.y - e.y, d = Math.hypot(dx, dy) || 1;
+    const speed = e.spd * (e.slowT > 0 ? 0.5 : 1) * zoneSlowAt(e.x, e.y);
+    let tx = dx / d, ty = dy / d, direct = false;
+    e.st += dt; e.aimA = Math.atan2(dy, dx);
+    if (e.kind === 'garlic') {
+      if (e.buried && !G.riceAt(e.x, e.y)) {
+        e.buried = false; e.state = 'panic'; e.st = 0; e.stunT = 0.55;
+        burst(e.x, e.y, 8, ['#fff3db'], 130, { kind: 'grain' }); hint('garlic', '饭吃掉了，蒜瓣藏不住啦！', 20);
+      }
+      if (!e.buried && e.st > 1.4 && G.riceAt(e.x, e.y)) { e.buried = true; e.state = 'burrow'; }
+      if (e.buried || e.state === 'panic') {
+        const k = G.cellIndex(e.x, e.y), R = G.rice, i0 = k % R.n, j0 = Math.floor(k / R.n);
+        e.riceSeekT = (e.riceSeekT || 0) - dt;
+        let target = e.riceGoal;
+        if (e.riceSeekT <= 0 || !target || !G.riceAt(target.x, target.y)) {
+          let best = Infinity; target = null; e.riceSeekT = 0.18;
+          for (let j = Math.max(0, j0 - 3); j <= Math.min(R.n - 1, j0 + 3); j++) for (let i = Math.max(0, i0 - 3); i <= Math.min(R.n - 1, i0 + 3); i++) {
+            const kk = j * R.n + i; if (!R.hp[kk]) continue;
+            const x = R.ox + (i + 0.5) * CFG.CELL, y = R.oy + (j + 0.5) * CFG.CELL, score = dist2(x, y, P.x, P.y) + dist2(x, y, e.x, e.y) * 0.7;
+            if (score < best) { best = score; target = { x, y }; }
+          }
+          e.riceGoal = target;
+        }
+        if (target) { const td = Math.hypot(target.x - e.x, target.y - e.y) || 1; tx = (target.x - e.x) / td; ty = (target.y - e.y) / td; }
+        else if (e.buried) { e.buried = false; e.state = 'panic'; e.st = 0; }
+      }
+    } else if (e.kind === 'mushroom') {
+      tx *= d > 190 ? 0.8 : 0; ty *= d > 190 ? 0.8 : 0;
+      if (e.state === 'walk' && e.st > 2.2 && d < 480) { e.state = 'capUp'; e.st = 0; e.spored = false; }
+      if (e.state === 'capUp') {
+        tx = ty = 0;
+        if (e.st > 0.42 && !e.spored) { e.spored = true; for (let i = -1; i <= 1; i++) shootE(e.x, e.y, e.aimA + i * 0.22, 190, 8, 'purple', 6, 410); Sfx.pop(); }
+        if (e.st > 1.0) { e.state = 'walk'; e.st = 0; }
+      }
+    } else if (e.kind === 'shrimp') {
+      if (e.state === 'walk' && e.st > 1.4 && d < 460) { e.state = 'coil'; e.st = 0; e.jumpN = 0; }
+      if (e.state === 'coil') {
+        tx = ty = 0; e.squash = 0.9;
+        if (!e.warn) {
+          const step = Math.min(185, d);
+          let x = e.x + dx / d * step, y = e.y + dy / d * step;
+          const lim = CFG.POT_R - 60, rd = Math.hypot(x, y); if (rd > lim) { x *= lim / rd; y *= lim / rd; }
+          e.warn = { x, y, r: 39 }; e.sx = e.x; e.sy = e.y;
+        }
+        if (e.st > (e.jumpN ? 0.24 : 0.55)) { e.state = 'spring'; e.st = 0; Sfx.jump(); }
+      } else if (e.state === 'spring') {
+        direct = true; const k = Math.min(1, e.st / 0.43);
+        e.x = lerp(e.sx, e.warn.x, k); e.y = lerp(e.sy, e.warn.y, k); e.z = Math.sin(k * Math.PI) * 105;
+        e.vx = e.vy = 0;
+        if (k >= 1) {
+          e.z = 0; e.jumpN++; e.warn = null; e.st = 0; e.state = e.jumpN >= 3 ? 'dizzy' : 'coil';
+          if (e.state === 'dizzy') e.stunT = 1.4;
+          G.rings.push({ x: e.x, y: e.y, r: 5, max: 44, life: 0, dur: 0.22, col: '#ffd2bd', w: 5 });
+          if (P.z < 18 && dist2(e.x, e.y, P.x, P.y) < (P.r + 39) ** 2) hurtPlayer(e.dmg, e.x, e.y, 'shrimp');
+        }
+      } else if (e.state === 'dizzy') { tx = ty = 0; if (e.st > 1.5) { e.state = 'walk'; e.st = 0; } }
+    } else if (e.kind === 'carrier') {
+      e.supplyT = (e.supplyT || 0) - dt;
+      if (e.bagHp > 0 && e.supplyT <= 0) {
+        e.supplyT = 1.8;
+        for (const a of G.enemies) if (a !== e && a.type !== 'boss' && !a.dead && dist2(a.x, a.y, e.x, e.y) < 175 ** 2) { a.armor = Math.min(18, (a.armor || 0) + 6); a.armorFlash = 0.5; }
+      }
+    } else if (e.kind === 'youtiao') {
+      e.mergeT = Math.max(0, (e.mergeT || 0) - dt);
+      if (e.half && e.pair && !e.pair.dead && e.mergeT <= 0 && e.pair.mergeT <= 0) {
+        const md = Math.hypot(e.pair.x - e.x, e.pair.y - e.y) || 1; tx = (e.pair.x - e.x) / md; ty = (e.pair.y - e.y) / md;
+        if (md < 28 && e.stunT <= 0 && e.pair.stunT <= 0) {
+          e.hp += e.pair.hp; e.maxHp += e.pair.maxHp; e.pair.dead = true; e.pair.pair = null; e.pair = null; e.half = false; e.r = 20; e.squash = 1.2;
+        }
+      }
+      if (!e.half && d < 110 && e.st > 1.3) {
+        e.st = 0; e.spinT = 0.4; Sfx.whoosh();
+        if (P.z < 26 && d < 82 + P.r) hurtPlayer(e.dmg, e.x, e.y, 'youtiao');
+      }
+      e.spinT = Math.max(0, (e.spinT || 0) - dt);
+    }
+    if (!direct) {
+      const blend = 1 - Math.exp(-dt * (e.stunT > 0 ? 4 : 5));
+      e.vx = lerp(e.vx, e.stunT > 0 ? 0 : tx * speed, blend); e.vy = lerp(e.vy, e.stunT > 0 ? 0 : ty * speed, blend);
+      const nx = e.x + e.vx * dt, ny = e.y + e.vy * dt;
+      if (!e.buried || G.riceAt(nx, ny)) { e.x = nx; e.y = ny; }
+    }
+    if (!e.buried) obsPush(e, e.r, e.z);
+    const rd = Math.hypot(e.x, e.y), lim = CFG.POT_R - e.r - 12; if (rd > lim) { e.x *= lim / rd; e.y *= lim / rd; }
+    if (!e.buried && e.z < 15 && P.z < 20 && e.stunT <= 0 && dist2(e.x, e.y, P.x, P.y) < (e.r + P.r - 2) ** 2) hurtPlayer(e.dmg, e.x, e.y, 'touch:' + e.kind);
+    return true;
+  }
+  function updateEnemies(dt, playerDt = dt) {
     const P = G.p;
     for (const e of G.enemies) {
       if (e.dead || e.state === 'idle') continue;
+      for (const key of ENEMY_TIMERS) e[key] = Math.max(0, (e[key] || 0) - dt);
       e.t += dt; e.flash = Math.max(0, e.flash - dt); e.squash *= Math.exp(-dt * 10); e.hitT = Math.max(0, (e.hitT || 0) - dt);
       e.slowT = Math.max(0, e.slowT - dt); e.stunT = Math.max(0, e.stunT - dt);
       if (e.stunT <= 0) e.sneeze = false;
@@ -1919,9 +2363,13 @@ const Game = (() => {
         }
         continue;
       }
+      if (e.heldBy) continue;
+      if (e.thrown) { stepThrown(e, playerDt); continue; }
+      if (e.freezeT > 0) { e.freezeT = Math.max(0, e.freezeT - dt); e.vx *= Math.exp(-dt * 30); e.vy *= Math.exp(-dt * 30); continue; }
+      if (stepFoodEnemy(e, dt)) continue;
       const dx = P.x - e.x, dy = P.y - e.y, d = Math.hypot(dx, dy) || 1;
       const onRice = G.riceAt(e.x, e.y) > 0;
-      let spd = e.spd * (onRice ? 0.55 : 1) * zoneSlowAt(e.x, e.y) * (e.slowT > 0 ? 0.5 : 1);
+      let spd = e.spd * (onRice ? 0.55 : 1) * zoneSlowAt(e.x, e.y) * (e.slowT > 0 ? 0.5 : 1) * (e.tetherT > 0 ? 0.25 : 1);
       if (e.type === 'boss' && !e.mid && G.t > G.bossAt + CFG.ENRAGE) spd *= 1.4;
       let tx = 0, ty = 0, steer = true;
       if (e.stunT > 0 && e.type !== 'boss') { steer = true; tx = 0; ty = 0; }
@@ -1965,7 +2413,7 @@ const Game = (() => {
         e.vx = lerp(e.vx, tx * spd, 1 - Math.exp(-dt * 6));
         e.vy = lerp(e.vy, ty * spd, 1 - Math.exp(-dt * 6));
       }
-      const moves = e.type !== 'boss' || e.state === 'walk' || e.state === 'roll' || e.state === 'scoop' || e.state === 'hover';
+      const moves = e.type !== 'boss' || e.state === 'walk' || e.state === 'roll' || e.state === 'ram' || e.state === 'scoop' || e.state === 'hover';
       if (moves) { e.x += e.vx * dt; e.y += e.vy * dt; }
       else if (e.type === 'boss') { e.vx *= 0.9; e.vy *= 0.9; }
       if (Math.abs(e.vx) > 5) e.face = e.vx > 0 ? 1 : -1;
@@ -1986,9 +2434,9 @@ const Game = (() => {
     }
     const E = G.enemies;
     for (let i = 0; i < E.length; i++) {
-      const a = E[i]; if (a.dead || a.z > 10) continue;
+      const a = E[i]; if (a.dead || a.buried || a.z > 10) continue;
       for (let j = i + 1; j < E.length; j++) {
-        const b = E[j]; if (b.dead || b.z > 10) continue;
+        const b = E[j]; if (b.dead || b.buried || b.z > 10) continue;
         const dx = b.x - a.x, dy = b.y - a.y, rr = a.r + b.r;
         const dd = dx * dx + dy * dy;
         if (dd < rr * rr && dd > 0.01) {
@@ -2026,6 +2474,7 @@ const Game = (() => {
       burst(e.x, e.y, 40, PALETTE[e.kind], 500, { kind: 'chunk' });
     }
     const hard = e.phase2 || G.L.hard;
+    if (e.kind === 'fryer') { updateFryer(e, dt, dx, dy, d, spd); return; }
     const chase = (k) => { e.vx = lerp(e.vx, dx / d * spd * k, 1 - Math.exp(-dt * 3)); e.vy = lerp(e.vy, dy / d * spd * k, 1 - Math.exp(-dt * 3)); };
     const after = (tired) => {
       e.atk++;
@@ -2236,6 +2685,50 @@ const Game = (() => {
       } else if (e.state === 'splash') { if (e.st > 0.6 * enr) { e.state = 'walk'; e.st = 0; } }
     }
   }
+  function updateFryer(e, dt, dx, dy, d, spd) {
+    if (e.state !== 'tilt') G.panTilt = lerp(G.panTilt, 0, 1 - Math.exp(-dt * 5));
+    if (e.state === 'walk') {
+      e.vx = lerp(e.vx, dx / d * spd * 0.65, 1 - Math.exp(-dt * 3)); e.vy = lerp(e.vy, dy / d * spd * 0.65, 1 - Math.exp(-dt * 3));
+      if (e.st > 2.6) { e.state = 'tiltWarn'; e.st = 0; e.tiltA = Math.atan2(dy, dx); e.cycles++; Sfx.catWind(); }
+    } else if (e.state === 'tiltWarn') {
+      e.vx = e.vy = 0; e.squash = Math.sin(e.st * 26) * 0.18;
+      if (e.st > 1.1) { e.state = 'tilt'; e.st = 0; G.panTiltA = e.tiltA; hint('tilt', '锅歪啦！吃出来的裸锅底抓地更稳。', 12, 4); Sfx.scrape(); }
+    } else if (e.state === 'tilt') {
+      G.panTilt = lerp(G.panTilt, 0.19, 1 - Math.exp(-dt * 4));
+      if (e.st > (e.phase2 ? 4.2 : 3.3)) {
+        e.state = 'wallPull'; e.st = 0;
+        for (let i = -1; i <= 1; i++) {
+          const a = e.tiltA + Math.PI / 2, x = G.p.x + dx / d * 120 + Math.cos(a) * i * 125, y = G.p.y + dy / d * 120 + Math.sin(a) * i * 125;
+          if (Math.hypot(x, y) < CFG.POT_R - 160) G.zones.push({ kind: 'riseWarn', x, y, a, r: 95, t: 0, dur: 1.1 });
+        }
+        Sfx.charge();
+      }
+    } else if (e.state === 'wallPull') {
+      e.vx = e.vy = 0;
+      if (e.st > 1.25) { e.state = 'ramWarn'; e.st = 0; e.lx = dx / d; e.ly = dy / d; Sfx.warn(); }
+    } else if (e.state === 'ramWarn') {
+      e.squash = 0.65; e.teleLen = 650; e.teleW = 110;
+      if (e.st > 0.85) { e.state = 'ram'; e.st = 0; e.vx = e.lx * 640; e.vy = e.ly * 640; Sfx.roll(); }
+    } else if (e.state === 'ram') {
+      destroyRiceCircle(e.x, e.y, 94, true);
+      for (const o of G.obs) if (!o.dead && o.hp && dist2(e.x, e.y, o.x, o.y) < (e.r + o.r + 20) ** 2) damageObs(o, 70);
+      if (e.st > 1.0 || Math.hypot(e.x, e.y) > CFG.POT_R - 120) { e.state = 'tired'; e.st = 0; e.vx = e.vy = 0; Sfx.slam(); G.addTrauma(0.4); }
+    } else if (e.state === 'tired' && e.st > 2.1) { e.state = 'walk'; e.st = 0; }
+  }
+  function slidePan(dt, enemyDt) {
+    if (G.panTilt < 0.001) return;
+    const a = G.panTiltA, strength = G.panTilt / 0.19;
+    for (let i = -1; i < G.enemies.length; i++) {
+      const e = i < 0 ? G.p : G.enemies[i];
+      if (e.dead || e.z > 6 || e.heldBy || e.thrown || e.buried || e === G.p && e.dashT > 0) continue;
+      const player = e === G.p, rice = riceOverlap(e.x, e.y, e.r + CFG.SPOON_GAP + 12) >= 0, grip = rice ? 155 : 32;
+      const step = (player ? dt : enemyDt) * grip * strength * (e.type === 'boss' ? 0.1 : 1);
+      const nx = e.x + Math.cos(a) * step, ny = e.y + Math.sin(a) * step;
+      if (!player || riceOverlap(nx, ny, e.r + CFG.SPOON_GAP) < 0) { e.x = nx; e.y = ny; }
+      obsPush(e, e.r, e.z);
+      const d = Math.hypot(e.x, e.y), lim = CFG.POT_R - e.r - 12; if (d > lim) { e.x *= lim / d; e.y *= lim / d; }
+    }
+  }
   function bossLand(e) {
     const P = G.p;
     e.squash = 1.6;
@@ -2258,32 +2751,95 @@ const Game = (() => {
     Sfx.pop(); sparks(b.x, b.y, b.z, 8, '#fff4c0', 260);
     b.split = 0;
   }
-  function updateBullets(dt) {
+  function bounceTarget(b) {
+    if (b.chain <= 0) return false;
+    let target = null, nearest = 350 ** 2;
+    for (const list of [G.enemies, G.obs]) for (const e of list) {
+      if (e.dead || e.state === 'idle' || e.z > 40 || b.hit.includes(e) || !e.hp || e.primed) continue;
+      const dd = dist2(b.x, b.y, e.x, e.y); if (dd >= nearest) continue;
+      // The next target must have an unobstructed path from the actual impact.
+      let clear = true;
+      for (const o of G.obs) {
+        if (o.dead || o === e || b.hit.includes(o) || o.h < b.z) continue;
+        const c = segClosest(o.x, o.y, b.x, b.y, e.x, e.y);
+        if (c.t > 0.04 && c.t < 0.98 && dist2(c.x, c.y, o.x, o.y) < (o.r + b.r * 0.5) ** 2) { clear = false; break; }
+      }
+      if (clear) { nearest = dd; target = e; }
+    }
+    if (!target) return false;
+    b.chain--; b.chainTarget = target;
+    const a = Math.atan2(target.y - b.y, target.x - b.x), speed = Math.hypot(b.vx, b.vy);
+    b.vx = Math.cos(a) * speed; b.vy = Math.sin(a) * speed; b.a = a;
+    G.rings.push({ x: b.x, y: b.y, r: 5, max: 34, life: 0, dur: 0.2, col: '#a4f6ff', w: 4 });
+    Sfx.clink();
+    if (b.hit.length >= 3) hint('ricochet', '叮、叮、叮！一盖连弹。', 14, 2.5);
+    return true;
+  }
+  function updateBullets(dt, enemyDt = dt) {
     for (const b of G.bullets) {
+      b.flightT += dt;
+      if (b.boomerang) {
+        if (!b.returned && b.flightT > 0.48) { b.returned = true; b.hit.length = 0; }
+        if (b.returned) {
+          const dx = G.p.x - b.x, dy = G.p.y - b.y, d = Math.hypot(dx, dy) || 1;
+          if (d < 25) { b.life = 0; continue; }
+          b.vx = dx / d * 660; b.vy = dy / d * 660;
+        }
+      }
+      if (b.chainTarget && !b.chainTarget.dead && b.chainTarget.hp > 0) {
+        const a = Math.atan2(b.chainTarget.y - b.y, b.chainTarget.x - b.x), speed = Math.hypot(b.vx, b.vy);
+        b.vx = Math.cos(a) * speed; b.vy = Math.sin(a) * speed; b.a = a;
+      }
+      const px = b.x, py = b.y;
       if (b.vis === 'flame') { b.r += dt * 26; b.vx *= Math.exp(-dt * 2); b.vy *= Math.exp(-dt * 2); }
       b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt; b.spin += dt * 20;
       if (b.life <= 0) { if (b.split) splitPop(b); continue; }
+      if (b.harvest) {
+        const n = Math.max(1, Math.ceil(Math.hypot(b.x - px, b.y - py) / 8));
+        for (let i = 0; i <= n; i++) {
+          const x = lerp(px, b.x, i / n), y = lerp(py, b.y, i / n), k = G.cellIndex(x, y);
+          if (k < 0 || !G.rice.hp[k]) continue;
+          // Solid cover blocks harvesting even if rice starts behind it.
+          if (bulletObs(x, y, b.r * 0.6, b.z)) break;
+          for (let bite = 0; bite < 2 && G.rice.hp[k]; bite++) biteCell(k, true);
+          impactAt(x, y, 26, 'grain', 24, b.a); b.life = 0;
+          hint('remote-rice', '饭来张口！远程补饭力。', 20, 2.5); break;
+        }
+        if (b.life <= 0) continue;
+      }
       if (b.flatten) destroyRiceCircle(b.x, b.y, b.r + 4, Math.random() < 0.7);
+      if (b.boomerang) { const k = G.cellIndex(b.x, b.y); if (k >= 0 && k !== b.lastCut) { b.lastCut = k; while (G.rice.hp[k]) biteCell(k, false); } }
       // 障碍物
       const ob = bulletObs(b.x, b.y, b.r * 0.6, b.z);
       if (ob) {
+        if (b.boomerang) { if (!b.returned) b.hit.length = 0; if (!b.hit.includes(ob.o)) { if (ob.o.hp) damageObs(ob.o, b.dmg); b.hit.push(ob.o); } b.returned = true; continue; }
         impactAt(ob.o.x + ob.nx * (ob.o.r + 2), ob.o.y + ob.ny * (ob.o.r + 2), Math.min(b.z, ob.o.h), b.vis === 'soy' ? 'soy' : 'metal', 16 + b.r * 2, Math.atan2(b.vy, b.vx));
         if (ob.o.hp) damageObs(ob.o, b.dmg); else { ob.o.flash = 0.08; ob.o.impact = 0.12; ob.o.hitA = Math.atan2(b.vy, b.vx); Sfx.clink(); }
+        if (b.vis === 'disc' && ob.o.maxHp) {
+          b.hit.push(ob.o);
+          if (!bounceTarget(b)) { b.life = 0; continue; }
+          b.x = ob.o.x + ob.nx * (ob.o.r + b.r + 2); b.y = ob.o.y + ob.ny * (ob.o.r + b.r + 2);
+          continue;
+        }
         if (b.bounce > 0) { const dot = b.vx * ob.nx + b.vy * ob.ny; b.vx -= 2 * dot * ob.nx; b.vy -= 2 * dot * ob.ny; b.x += ob.nx * 4; b.y += ob.ny * 4; b.bounce--; Sfx.clink(); sparks(b.x, b.y, b.z, 6, '#ffffff', 200); }
         else if (b.vis !== 'flame') { b.life = 0; if (b.split) splitPop(b); sparks(b.x, b.y, b.z, 4, '#fff4d0', 160); continue; }
       }
       const bd = Math.hypot(b.x, b.y);
       if (bd > CFG.POT_R - 8) {
-        if (b.bounce > 0) { const nx = b.x / bd, ny = b.y / bd, dot = b.vx * nx + b.vy * ny; b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny; b.x = nx * (CFG.POT_R - 10); b.y = ny * (CFG.POT_R - 10); b.bounce--; Sfx.clink(); }
+        if (b.boomerang) { if (!b.returned) b.hit.length = 0; b.returned = true; b.x *= (CFG.POT_R - 12) / bd; b.y *= (CFG.POT_R - 12) / bd; }
+        else if (b.bounce > 0) { const nx = b.x / bd, ny = b.y / bd, dot = b.vx * nx + b.vy * ny; b.vx -= 2 * dot * nx; b.vy -= 2 * dot * ny; b.x = nx * (CFG.POT_R - 10); b.y = ny * (CFG.POT_R - 10); b.bounce--; Sfx.clink(); }
         else { b.life = 0; continue; }
       }
       for (const e of enemyGrid.query(b.x, b.y, b.r + 85)) {
-        if (e.dead || e.z > 40 || e.state === 'idle' || b.hit.includes(e)) continue;
+        if (e.dead || e.buried || e.z > 40 || e.state === 'idle' || b.hit.includes(e)) continue;
         if (dist2(b.x, b.y, e.x, e.y) < (e.r + b.r) ** 2) {
           b.hit.push(e);
           damageEnemy(e, b.dmg, b.x - b.vx * 0.02, b.y - b.vy * 0.02, b.kb, b.vis === 'flame' || b.vis === 'soy', b.vis);
           if (b.slow) e.slowT = Math.max(e.slowT, b.slow);
           if (b.burn) e.burnT = Math.max(e.burnT, b.burn);
+          if (b.cheese) cheeseLink(e);
+          if (b.freeze) { e.freezeT = e.type === 'boss' ? Math.min(0.28, b.freeze) : b.freeze; e.iceCrackT = 0; }
+          if (b.vis === 'disc') { if (!bounceTarget(b)) b.life = 0; break; }
           if (b.split) { splitPop(b); b.life = 0; break; }
           if (b.pierce-- <= 0) { b.life = 0; break; }
         }
@@ -2300,7 +2856,7 @@ const Game = (() => {
     // 敌方抛物（咖喱泡泡）：落点有预警圈
     const P = G.p;
     for (const l of G.elobs) {
-      l.t += dt; const k = Math.min(1, l.t / l.T);
+      l.t += enemyDt; const k = Math.min(1, l.t / l.T);
       l.x = lerp(l.x0, l.tx, k); l.y = lerp(l.y0, l.ty, k); l.z = 20 + Math.sin(k * Math.PI) * 200;
       if (k >= 1) {
         l.done = true; Sfx.splat();
@@ -2312,8 +2868,8 @@ const Game = (() => {
     }
     G.elobs = G.elobs.filter(l => !l.done);
     for (const b of G.ebullets) {
-      const f = 1 - b.fade * 0.3, dx = b.vx * dt * f, dy = b.vy * dt * f;
-      b.x += dx; b.y += dy; b.traveled += Math.hypot(dx, dy); b.life -= dt;
+      const f = 1 - b.fade * 0.3, dx = b.vx * enemyDt * f, dy = b.vy * enemyDt * f;
+      b.x += dx; b.y += dy; b.traveled += Math.hypot(dx, dy); b.life -= enemyDt;
       if (b.life <= 0 || b.traveled >= b.range) { b.life = 0; continue; }
       b.fade = clamp((b.traveled / b.range - 0.7) / 0.3, 0, 1);
       b.scale = 1 - b.fade * 0.92; b.r = b.baseR * b.scale; b.dmg = b.baseDmg * (1 - b.fade) ** 2;
@@ -2337,7 +2893,7 @@ const Game = (() => {
       }
       const dd = dist2(u.x, u.y, P.x, P.y);
       if (u.kind === 'orb' || u.kind === 'side') {
-        const magR = u.kind === 'orb' ? 120 * (P.full < 15 ? 1.3 : 1) : 60;
+        const magR = P.buffs.magnet > 0 ? 620 : u.kind === 'orb' ? 120 * (P.full < 15 ? 1.3 : 1) : 60;
         if (!u.mag && u.t > 0.3 && (dd < magR * magR || (u.kind === 'orb' && u.t > 5 && dd < 320 * 320) || G.phase === 'rest')) u.mag = true;
         if (u.mag) { const d = Math.sqrt(dd) || 1, s = Math.min(260 + (u.mt || 0) * 900, d / dt); u.mt = (u.mt || 0) + dt; u.vx = (P.x - u.x) / d * s; u.vy = (P.y - u.y) / d * s; }
         else { u.vx *= Math.exp(-dt * 4); u.vy *= Math.exp(-dt * 4); }
@@ -2349,7 +2905,7 @@ const Game = (() => {
         if (u.kind === 'orb') { u.got = true; P.full = Math.min(100, P.full + 1.5 * P.s.fullGain); Sfx.pickup(G.pickChain = (G.pickChain || 0) + 1); G.pickChainT = 0.5; }
         else if (u.kind === 'side') { u.got = true; eatSide(u.sid); }
         else if (u.kind === 'chest') { u.got = true; openChest(u); }
-        else if (u.kind === 'weapon' && !u.ped && P.weps[1] === null && u.t > 0.6) takeWeapon(u); // 第二格空着就直接拿
+        else if (u.kind === 'weapon' && !u.ped && P.weps[1] === null && u.t > 0.6) { takeWeapon(u); break; }
       }
     }
     G.pickChainT = (G.pickChainT || 0) - dt; if (G.pickChainT <= 0) G.pickChain = 0;
@@ -2362,6 +2918,7 @@ const Game = (() => {
     sparks(u.x, u.y, 20, 24, '#ffd34d', 300);
     dropWeapon(u.x, u.y, rollWeapon(0.8, 1));
     dropSide(u.x, u.y);
+    dropSide(u.x + 28, u.y, 'clock');
   }
   function updateFx(dt) {
     const P = G.p;
@@ -2371,7 +2928,10 @@ const Game = (() => {
       p.life += dt;
       if (p.home) {
         const k = Math.min(1, p.life / p.max);
-        p.x = lerp(p.x, P.x, k * 0.35); p.y = lerp(p.y, P.y, k * 0.35); p.z = lerp(p.z, 30 + P.z, k * 0.35);
+        if (p.slurp) {
+          const dx = P.x - p.sx, dy = P.y - p.sy, len = Math.hypot(dx, dy) || 1, arc = Math.sin(k * Math.PI) * 28 * p.arc;
+          p.x = lerp(p.sx, P.x, k) - dy / len * arc; p.y = lerp(p.sy, P.y, k) + dx / len * arc; p.z = lerp(18, 32 + P.z, k) + Math.sin(k * Math.PI) * 48;
+        } else { p.x = lerp(p.x, P.x, k * 0.35); p.y = lerp(p.y, P.y, k * 0.35); p.z = lerp(p.z, 30 + P.z, k * 0.35); }
       } else {
         p.vz -= p.g * dt; p.z += p.vz * dt;
         if (p.z < 0) { p.z = 0; p.vz *= -0.3; p.vx *= 0.6; p.vy *= 0.6; }
@@ -2389,6 +2949,7 @@ const Game = (() => {
     for (const s of G.swings) s.t += dt; G.swings = G.swings.filter(s => s.t < s.dur);
     for (const b of G.booms) b.t += dt; G.booms = G.booms.filter(b => b.t < b.dur);
     if (G.banner) { G.banner.t += dt; if (G.banner.t > G.banner.dur) G.banner = null; }
+    if (G.tip) { G.tip.t += dt; if (G.tip.t > G.tip.dur) G.tip = null; }
     G.flashWhite = Math.max(0, G.flashWhite - dt * 2.5);
   }
 
@@ -2399,7 +2960,7 @@ const Game = (() => {
     G.checkpoint = null; G.store.set('run8', '');
     G.runs++; G.store.set('runs', G.runs);
     if (win) {
-      Sfx.win(); banner('一顿吃完！', '三口锅全部吃光了', 3);
+      Sfx.win(); banner('一顿吃完！', `${POTS.length} 口锅全部吃光了`, 3);
       const before = [0, 1, 2].filter(i => heatUnlocked(i, G.cleared)).length;
       G.cleared.add(G.heat);
       G.over.newUnlock = [0, 1, 2].filter(i => heatUnlocked(i, G.cleared)).length > before;
@@ -2415,6 +2976,14 @@ const Game = (() => {
     if (G.state !== 'pause' && G.state !== 'layout') G.real += dt;
     if (cmd.mute) Sfx.toggleMute();
     if (cmd.auto) Settings.toggle('auto', !!cmd.touch);
+    if (cmd.assistAim) Settings.toggle('aim', !!cmd.touch);
+    if (G.state === 'weapon') {
+      G.weaponInfo.t += dt;
+      if (G.weaponInfo.t > 0.28 && (cmd.start || cmd.use || cmd.back || cmd.pause || cmd.taps.some(tp => hit(tp, weaponInfoLayout(ui.W, ui.H).done)))) {
+        G.weaponInfo = null; G.state = 'play'; G.resumeGrace = 0.2; Sfx.setPaused(false);
+      }
+      return;
+    }
     if (G.state === 'layout') { if (cmd.pause || cmd.start) G.state = 'pause'; return; }
     if (G.state === 'title') {
       updateFx(dt);
@@ -2468,13 +3037,18 @@ const Game = (() => {
     if (!G.over) { G.runT += gdt; if (G.phase === 'fight' || G.phase === 'boss') G.t += gdt; }
     if (G.resumeGrace > 0) { G.resumeGrace -= dt; cmd.dash = cmd.ult = cmd.jump = false; }
     if (!G.over) { assist(cmd); updatePlayer(gdt, cmd); updateInterference(gdt); }
+    if (G.state !== 'play') return;
+    updateRefillGuide();
+    updateKitchen(gdt);
     if (G.phase === 'drop' && G.p.z <= 0) { G.phase = 'fight'; G.p.inv = 1; }
     if (G.phase === 'rest' || G.phase === 'launch') updateRest(gdt);
-    updateSpawner(gdt);
-    updateHazards(gdt);
-    updateEnemies(gdt);
+    const enemyDt = gdt * (G.p.buffs.clock > 0 ? 0.22 : 1);
+    updateSpawner(enemyDt);
+    updateHazards(enemyDt);
+    updateEnemies(enemyDt, gdt);
+    slidePan(gdt, enemyDt);
     enemyGrid.rebuild(G.enemies);
-    updateBullets(gdt);
+    updateBullets(gdt, enemyDt);
     updatePickups(gdt);
     updateFx(gdt);
     if (G.over) {
@@ -3628,12 +4202,20 @@ const R3 = (() => {
     const sprout = bakeGroup(sb); sprout.position.set(0.9, 17, -1); head.add(sprout);
     // Held models are built when first selected, then retained for later swaps.
     const hand = grp(); hand.position.set(6.2, 15, 9); inner.add(hand);
+    const spoon = grp(), spoonBody = grp();
+    spoonBody.add(mk(GEO.rbox, PAL.woodLight, 0, 0, -12, 2.5, 2, 25));
+    spoonBody.add(mk(GEO.sphereMid, PAL.steel, 0, 0, 5, 8, 2.6, 10));
+    spoonBody.add(mk(GEO.sphereMid, PAL.cream, 0, 1.7, 5, 6.5, 1, 8));
+    spoon.add(bakeGroup(spoonBody));
+    const spoonRice = grp();
+    for (let i = 0; i < 5; i++) { const g = mk(GEO.grain, PAL.rice, (i % 3 - 1) * 3, 3 + i % 2, 3 + (i % 2) * 4, 0.8); g.rotation.set(1.3, i, 0.3); spoonRice.add(g); }
+    const spoonLoad = bakeGroup(spoonRice); spoon.add(spoonLoad); spoon.visible = false; root.add(spoon);
     const guns = {};
     const flash = new THREE.Mesh(GEO.star, MAT.glowC); flash.visible = false; flash.renderOrder = 6; hand.add(flash);
     const shield = new THREE.Mesh(GEO.sphere, MAT.shield); shield.scale.setScalar(34); shield.position.y = 22; root.add(shield);
     scene.add(root);
     root.scale.setScalar(1.13);
-    return { root, body, inner, legs, arms, torso, head, eatingMouth, sprout, hand, guns, flash, shield, blink: 2, cur: null, swap: 0, faceT: 0, lastHp: 100 };
+    return { root, body, inner, legs, arms, torso, head, eatingMouth, sprout, hand, spoon, spoonLoad, guns, flash, shield, blink: 2, cur: null, swap: 0, faceT: 0, lastHp: 100 };
   }
   // ---- 食物怪（可爱笨拙：圆滚滚、小短脚、表情丰富）----
   function bOnigiri(scale, opt) {
@@ -3765,6 +4347,54 @@ const R3 = (() => {
   function bGauge() { const b = grp(); const d = mk(GEO.cyl, PAL.steelDark, 0, 0, 0, 12, 3, 12, 0.3); d.rotation.x = Math.PI / 2; b.add(d); const f = mk(GEO.cyl, PAL.dial, 0, 0, 1.8, 10, 0.6, 10); f.rotation.x = Math.PI / 2; b.add(f); const rz = mk(new THREE.CylinderGeometry(10.2, 10.2, 0.8, 16, 1, false, -0.2, 1.4), PAL.needle, 0, 0, 2); rz.rotation.x = Math.PI / 2; b.add(rz); return b; }
   function bNeedle() { const b = grp(); b.add(mk(GEO.rbox, PAL.black, 0, 4, 0, 1.6, 9, 1)); b.add(mk(GEO.sphereLo, PAL.black, 0, 0, 0, 1.8)); return b; }
 
+  function bKitchenEnemy(id) {
+    const b = grp();
+    if (id === 'garlic') {
+      b.add(mk(GEO.sphereMid, PAL.cream, 0, 12, 0, 13, 15, 12));
+      b.add(mk(GEO.cone, PAL.cream, 0, 28, -1, 5, 12, 5));
+      for (const x of [-6, 0, 6]) b.add(mk(GEO.cyl, PAL.woodLight, x, 10, -9, 0.6, 15, 0.6));
+      face(b, 0, 14, 11.5, 19, 14, 7); feet(b, 7, 1, 1, 0.8, PAL.woodDark);
+    } else if (id === 'garlicMound') b.add(mk(GEO.sphereTop, PAL.rice, 0, 0, 0, 23, 13, 21));
+    else if (id === 'mushroom') {
+      b.add(mk(GEO.cyl, PAL.cream, 0, 13, 0, 10, 25, 11)); face(b, 0, 17, 10, 20, 14, 0); feet(b, 7, 1, 2, 0.9, PAL.woodDark);
+    } else if (id === 'mushroomCap') {
+      b.add(mk(GEO.sphereTop, PAL.porkSkin, 0, 0, 0, 28, 16, 26));
+      b.add(mk(GEO.cyl, PAL.cream, 0, 1, 0, 27, 3, 25));
+      for (let i = 0; i < 6; i++) { const a = i * TAU / 6; b.add(mk(GEO.sphereLo, PAL.cream, Math.cos(a) * 16, 12, Math.sin(a) * 14, 3, 1.5, 3)); }
+    } else if (id === 'shrimp') {
+      for (let i = 0; i < 5; i++) { const a = -1 + i * 0.48; b.add(mk(GEO.sphereMid, i % 2 ? PAL.salmon : PAL.tomato, Math.cos(a) * 9 - 5, 12 + Math.sin(a) * 7, (i - 2) * 6, 9 - i * 0.5, 8 - i * 0.5, 5)); }
+      face(b, 0, 14, 15, 17, 12, 7); feet(b, 7, 1, 3, 0.8, PAL.salmon);
+    } else if (id === 'shrimpTail') {
+      for (let i = -1; i <= 1; i++) { const fin = mk(GEO.rbox, PAL.tomato, i * 5, 0, 0, 6, 2, 13); fin.rotation.y = i * 0.5; b.add(fin); }
+    } else if (id === 'carrier') {
+      b.add(mk(GEO.onigiri, PAL.rice, 0, 0, 0, 0.85, 0.85, 0.85));
+      b.add(mk(GEO.rbox, PAL.nori, 0, 11, 13, 16, 15, 8)); face(b, 0, 24, 16, 21, 14, 6); feet(b, 11, 1, 0, 1, PAL.woodDark);
+    } else if (id === 'carrierBag') {
+      b.add(mk(GEO.sphereMid, PAL.woodLight, 0, 0, 0, 20, 26, 15));
+      b.add(mk(GEO.cyl, PAL.woodDark, 0, 24, 0, 6, 5, 6)); b.add(mk(GEO.grain, PAL.rice, 0, 25, 1, 1.8));
+      for (const x of [-9, 9]) b.add(mk(GEO.rbox, PAL.cream, x, 0, 10, 3, 38, 3));
+    } else if (id === 'youtiao' || id === 'youtiaoHalf') {
+      for (const side of id === 'youtiaoHalf' ? [0] : [-1, 1]) {
+        const stick = mk(GEO.capsule, PAL.woodLight, side * 8, 17, 0, 7, 17, 7); stick.rotation.z = side * 0.22; b.add(stick);
+        for (let i = 0; i < 5; i++) b.add(mk(GEO.sphereLo, PAL.gold, side * 8 + Math.sin(i * 2) * 3, 3 + i * 7, 5.5, 3.5, 2.2, 1.5));
+      }
+      face(b, 0, 21, 7, id === 'youtiaoHalf' ? 13 : 24, 16, 0); feet(b, id === 'youtiaoHalf' ? 4 : 11, 1, 0, 0.9, PAL.woodDark);
+    }
+    return b;
+  }
+  function bDumpling() {
+    const b = grp(); b.add(mk(GEO.sphereMid, PAL.cream, 0, 2, 0, 12, 7, 8));
+    b.add(mk(GEO.sphereMid, PAL.gold, 0, -1.8, 0, 11, 1.6, 7));
+    for (let i = -2; i <= 2; i++) { const fold = mk(GEO.capsule, PAL.woodLight, i * 3.5, 6, 0, 1.2, 2.3, 1.2); fold.rotation.z = i * 0.2; b.add(fold); }
+    return b;
+  }
+  function bNori(rolled = false) {
+    const b = grp();
+    if (rolled) { const m = mk(GEO.cyl, PAL.nori, 0, 0, 0, 6, 17, 6); m.rotation.z = Math.PI / 2; b.add(m); }
+    else { const m = mk(new THREE.TorusGeometry(1, 0.26, 6, 22, Math.PI * 1.45), PAL.nori, 0, 0, 0, 13, 13, 4); m.rotation.x = Math.PI / 2; b.add(m); }
+    for (let i = 0; i < 7; i++) { const a = i / 7 * Math.PI * 1.45; b.add(mk(GEO.grain, PAL.cream, Math.cos(a) * 13, 1.7, Math.sin(a) * 13, 0.3)); }
+    return b;
+  }
   // ---- 武器（握把在原点，枪口朝 +z）----
   function bWeapon(id) {
     const b = grp();
@@ -3844,6 +4474,48 @@ const R3 = (() => {
       const sa = mk(GEO.cyl, PAL.salmon, 0, 0, 18.7, 2.6, 0.6, 2.6); sa.rotation.x = Math.PI / 2; b.add(sa);
       b.add(mk(GEO.sphereLo, PAL.wasabi, 0, 0, 19.6, 1.8, 1.8, 1.2));
       b.add(mk(GEO.rbox, PAL.woodDark, 0, -6, 4, 2.6, 6, 3, 0.3));
+    } else if (id === 'mochi') {
+      b.add(mk(GEO.rbox, PAL.woodDark, 0, 0, 9, 3, 3, 24));
+      const head = part('mochiHead', 0, 1, 25);
+      head.add(mk(GEO.sphereMid, PAL.cream, 0, 0, 0, 18, 8.5, 9));
+      for (const x of [-14, 14]) head.add(mk(GEO.sphereMid, PAL.tongue, x, 0, 0, 4, 7.5, 8));
+      head.add(mk(GEO.grain, PAL.rice, -4, 8, 0, 0.6));
+    } else if (id === 'nori') {
+      const blade = bNori(); blade.position.z = 14; b.add(blade);
+      b.add(mk(GEO.rbox, PAL.woodDark, 0, 0, 2, 3, 3, 9));
+    } else if (id === 'strainer') {
+      b.add(mk(GEO.rbox, PAL.woodDark, 0, 0, 5, 3, 3, 16));
+      const cup = part('catchCup', 0, 0, 24);
+      for (let i = 0; i < 4; i++) { const ring = mk(GEO.torus, PAL.steel, 0, -4 + i * 1.4, 0, 6 + i * 2.3, 6 + i * 2.3, 12); ring.rotation.x = Math.PI / 2; cup.add(ring); }
+      for (let i = -2; i <= 2; i++) { cup.add(mk(GEO.rbox, PAL.steel, i * 4, -1, 0, 0.65, 0.65, 19 - Math.abs(i) * 3)); cup.add(mk(GEO.rbox, PAL.steel, 0, -1, i * 4, 19 - Math.abs(i) * 3, 0.65, 0.65)); }
+      const balls = part('caughtBalls', 0, 1, 24);
+      for (let i = 0; i < 6; i++) { const a = i / 6 * TAU; balls.add(mk(GEO.sphereLo, i % 2 ? PAL.tomato : PAL.yolk, Math.cos(a) * 5, i % 2 * 3, Math.sin(a) * 5, 2.8)); }
+    } else if (id === 'cheese') {
+      b.add(mk(GEO.rbox, PAL.gold, 0, 0, 8, 8, 8, 17)); b.add(mk(GEO.cyl, PAL.cream, 0, -5, 5, 5, 8, 5));
+      const nozzle = mk(GEO.cone, PAL.woodLight, 0, 0, 20, 4, 10, 4); nozzle.rotation.x = Math.PI / 2; b.add(nozzle);
+      for (const x of [-3, 3]) b.add(mk(GEO.sphereLo, PAL.woodDark, x, 1.5, 16, 1.4));
+    } else if (id === 'soda') {
+      const bottle = part('sodaBody', 0, 0, 8), bd = mk(GEO.capsule, PAL.machineBlue, 0, 0, 0, 6, 6, 6); bd.rotation.x = Math.PI / 2; bottle.add(bd);
+      const neck = mk(GEO.cyl, PAL.steel, 0, 0, 12, 2.3, 8, 2.3); neck.rotation.x = Math.PI / 2; bottle.add(neck);
+      bottle.add(mk(GEO.rbox, PAL.cream, 0, 4.9, 0, 8, 1, 10));
+      for (let i = 0; i < 5; i++) bottle.add(mk(GEO.sphereLo, PAL.eyeHi, Math.sin(i * 3) * 4, 3, i * 2 - 5, 0.9));
+      const cap = mk(GEO.cyl, PAL.gold, 0, 0, 16, 3.4, 1.5, 3.4); cap.rotation.x = Math.PI / 2; bottle.add(cap);
+    } else if (id === 'gyoza') {
+      b.add(mk(GEO.rbox, PAL.lacquer, 0, -3, 6, 7, 6, 14)); const food = bDumpling(); food.scale.setScalar(0.75); food.position.z = 18; b.add(food);
+      for (const x of [-7, 7]) b.add(mk(GEO.rbox, PAL.steel, x, 0, 12, 2, 2, 20));
+    } else if (id === 'ricochet') {
+      b.add(mk(GEO.rbox, PAL.machineBlue, 0, -1, 2, 6, 7, 12));
+      b.add(mk(GEO.sphereTop, PAL.steel, 0, 0, 19, 13, 4, 13));
+      const rim = mk(GEO.torus, PAL.gold, 0, 0, 19, 12.5, 12.5, 16); rim.rotation.x = Math.PI / 2; b.add(rim);
+      b.add(mk(GEO.rbox, PAL.black, 0, 5, 19, 10, 3, 3));
+      for (const x of [-4, 4]) b.add(mk(GEO.rbox, PAL.gold, x, 1, 3, 1.2, 2, 10));
+    } else if (id === 'vacuum') {
+      b.add(mk(GEO.rbox, PAL.machineBlue, 0, 0, 6, 5.5, 5.5, 19));
+      for (const z of [0, 5, 10]) b.add(mk(GEO.torus, PAL.steel, 0, 0, z, 3, 3, 7));
+      b.add(mk(GEO.sphereMid, PAL.steel, 0, 0, 24, 9, 3.2, 12));
+      b.add(mk(GEO.sphereMid, PAL.machineBlue, 0, 2, 24, 7, 1, 9));
+      b.add(mk(GEO.grain, PAL.rice, 0, 3.8, 24, 0.85));
+      b.add(mk(GEO.cyl, PAL.gold, 0, 4, 7, 4, 2, 4));
     } else if (id === 'steamer') {
       b.add(mk(GEO.cyl, PAL.white, 0, 0, 7, 8, 10, 8, 0.3));
       b.add(mk(GEO.sphereTop, PAL.steel, 0, 5, 7, 8, 4, 8, 0.2));
@@ -3884,6 +4556,21 @@ const R3 = (() => {
     else if (id === 'ume') { b.add(mk(GEO.sphereMid, PAL.ume, 0, 0, 0, 6, 5.4, 6, 0.4)); b.add(mk(GEO.sphereLo, pal('#ff8a9a', 3), -2, 2.4, 3.2, 1.4)); }
     else if (id === 'corn') { for (let i = 0; i < 6; i++) { const a = i / 6 * TAU; b.add(mk(GEO.rbox, PAL.kernel, Math.cos(a) * 3.6, (i % 2) * 2, Math.sin(a) * 3.6, 3.6, 3.2, 3.6, 0.3)); } }
     else if (id === 'yolk') { b.add(mk(GEO.eggWhite, PAL.eggWhite, 0, -1, 0, 9, 1.6, 9, 0.2)); b.add(mk(GEO.sphereTop, PAL.yolk, 0, 0, 0, 5, 4, 5, 0.3)); }
+    else if (id === 'clock') {
+      const d = mk(GEO.cyl, PAL.machineBlue, 0, 0, 0, 9, 3.2, 9); d.rotation.x = Math.PI / 2; b.add(d);
+      const f = mk(GEO.cyl, PAL.dial, 0, 0, 1.8, 7.2, 0.8, 7.2); f.rotation.x = Math.PI / 2; b.add(f);
+      b.add(mk(GEO.rbox, PAL.black, 0, 2, 2.4, 1, 5, 0.6)); b.add(mk(GEO.rbox, PAL.black, 2, 0, 2.4, 5, 1, 0.6));
+      b.add(mk(GEO.rbox, PAL.gold, 0, 10, 0, 5, 3, 3));
+    } else if (id === 'magnet') {
+      const m = mk(GEO.torus, PAL.red, 0, 0, 0, 7, 7, 15); b.add(m);
+      b.add(mk(GEO.rbox, PAL.machineBlue, -6, -7, 0, 5, 6, 4)); b.add(mk(GEO.rbox, PAL.steel, 6, -7, 0, 5, 6, 4));
+    } else if (id === 'frenzy') {
+      b.add(mk(GEO.cyl, PAL.red, 0, 0, 0, 5, 12, 5)); b.add(mk(GEO.cone, PAL.gold, 0, 9, 0, 4, 6, 4));
+      b.add(mk(GEO.rbox, PAL.cream, 0, 0, 4.8, 6, 5, 1));
+    } else if (id === 'feast') {
+      b.add(mk(GEO.rbox, PAL.nori, 0, -2, 0, 16, 7, 12)); b.add(mk(GEO.sphereMid, PAL.rice, 0, 2, 0, 7, 3, 5));
+      b.add(mk(GEO.sphereLo, PAL.yolk, 3, 4, 1, 3, 2, 3));
+    }
     return b;
   }
   // ---- 障碍物 ----
@@ -4108,6 +4795,9 @@ const R3 = (() => {
       warnRing: pool(GEO.ring, MAT.warn, 40), warnFill: pool(GEO.disc, MAT.warnFill, 40),
       aimRing: pool(GEO.ring, MAT.aimRing, 12),
       stars: pool(GEO.star, MAT.glowC, 90, false, true),
+      threads: pool(GEO.cyl, MAT.chunk, 48, false, true),
+      shells: pool(GEO.sphereLo, MAT.shield, 48),
+      traces: pool(GEO.disc, MAT.scorch, 24),
       grainS: pool(GEO.grainS, MAT.grainS, 3800),
     };
     pools.grainS.receiveShadow = true;
@@ -4133,9 +4823,27 @@ const R3 = (() => {
     // 模型种类（实例化）
     kind('oni', bOnigiri(0.82), 48, true); kind('chest', bOnigiri(1.15, { gold: true }), 2, true);
     kind('pea', bPea(), 30, true); kind('radish', bRadish(), 30, true); kind('egg', bEgg(), 36, true); kind('chili', bChili(), 30, true);
+    for (const id of ['garlic', 'garlicMound', 'mushroom', 'mushroomCap', 'shrimp', 'shrimpTail', 'carrier', 'carrierBag', 'youtiao', 'youtiaoHalf']) kindBuilders[id] = () => kind(id, bKitchenEnemy(id), 48, true);
+    kindBuilders.noriP = () => kind('noriP', bNori(), 12, true);
+    kindBuilders.noriRoll = () => kind('noriRoll', bNori(true), 12, true);
+    kindBuilders.gyozaP = () => kind('gyozaP', bDumpling(), 12, true);
+    kindBuilders.cheeseP = () => kind('cheeseP', bDrop(PAL.yolk), 120);
+    kindBuilders.capP = () => {
+      const b = grp(); b.add(mk(GEO.cyl, PAL.machineBlue, 0, 0, 0, 8, 3, 8));
+      const rim = mk(GEO.torus, PAL.steel, 0, 1.5, 0, 8, 8, 9); rim.rotation.x = Math.PI / 2; b.add(rim); kind('capP', b, 24, true);
+    };
+    kindBuilders.meatballP = () => {
+      const b = grp(); b.add(mk(GEO.sphereMid, PAL.rice, 0, 0, 0, 1));
+      for (let i = 0; i < 6; i++) b.add(mk(GEO.sphereLo, i % 2 ? PAL.tomato : PAL.nori, Math.cos(i * 2.4) * 0.82, Math.sin(i * 1.3) * 0.7, Math.sin(i * 2.4) * 0.82, 0.18)); kind('meatballP', b, 16, true);
+    };
     kind('bento', bBento(), 6, true); kind('ped', bPedestal(), 4, true);
     kind('red', bTomato(), 130); kind('purple', bGrape(), 130); kind('ricebul', bRiceShot(), 140); kind('yolkbul', bDrop(PAL.yolk), 140); kind('currybul', bDrop(PAL.curry), 140);
     kind('bomb', bOrbBomb(), 10, true); kind('pin', bRollPinProj(), 16, true); kind('cleaverP', bCleaverProj(), 24, true); kind('pop', bPopcorn(), 120);
+    kindBuilders.discP = () => {
+      const b = grp(); b.add(mk(GEO.sphereTop, PAL.steel, 0, 0, 0, 11, 3, 11));
+      const rim = mk(GEO.torus, PAL.gold, 0, 0, 0, 11, 11, 15); rim.rotation.x = Math.PI / 2; b.add(rim);
+      b.add(mk(GEO.rbox, PAL.black, 0, 4, 0, 8, 2, 2)); kind('discP', b, 32, true);
+    };
     for (const id of WEAPON_IDS) kindBuilders['w_' + id] = () => kind('w_' + id, bWeapon(id), 6, true);
     for (const id of SIDE_IDS) kindBuilders['s_' + id] = () => kind('s_' + id, bSide(id), 8, true);
     kind('o_soy', bSoy(), 6, true, true); kind('o_shaker', bShaker(), 6, true, true); kind('o_barrel', bJar(), 8, true);
@@ -4156,10 +4864,27 @@ const R3 = (() => {
     else if (kind === 'eggqueen') r = rig(bEggQueen());
     else if (kind === 'porkking') r = rig(bPorkKing());
     else if (kind === 'cooker') r = buildCookerRig();
+    else if (kind === 'fryer') r = buildFryerRig();
     else return null;
     isolatedMaterials(r.root, r.matCache); r.mats = [];
     r.root.traverse(o => { if (o.material?.emissive && !r.mats.includes(o.material)) r.mats.push(o.material); });
     bossRigs[kind] = r; return r;
+  }
+  function buildFryerRig() {
+    const b = grp();
+    b.add(mk(GEO.rbox, PAL.machineBlue, 0, 25, 0, 120, 42, 88));
+    b.add(mk(GEO.rbox, PAL.steelDark, 0, 9, 0, 126, 12, 92));
+    for (const x of [-45, 45]) for (const z of [-29, 29]) b.add(mk(GEO.sphereMid, PAL.black, x, 5, z, 12, 12, 7));
+    for (const x of [-30, -15, 0, 15, 30]) b.add(mk(GEO.rbox, PAL.black, x, 28, -44, 6, 15, 2));
+    face(b, 0, 29, 44.5, 52, 25, 7);
+    const R = rig(b), pan = grp(), panBody = grp(); pan.position.set(0, 53, 0);
+    panBody.add(mk(GEO.bowl, PAL.iron, 0, 0, 0, 56, 23, 48));
+    panBody.add(mk(GEO.sphereTop, PAL.rice, 0, 9, 0, 43, 10, 37));
+    for (const side of [-1, 1]) panBody.add(mk(GEO.rbox, PAL.black, side * 62, 5, 0, 26, 8, 13));
+    for (let i = 0; i < 9; i++) panBody.add(mk(GEO.rbox, i % 2 ? PAL.scallion : PAL.tomato, Math.cos(i * 2.4) * 30, 16, Math.sin(i * 2.4) * 23, 5, 4, 5));
+    const bakedPan = bakeGroup(panBody); pan.add(bakedPan); R.root.add(pan); R.pan = pan;
+    const arm = grp(); arm.position.set(66, 50, -7); const tool = bakeGroup(bSpatula()); tool.scale.setScalar(0.8); tool.rotation.z = -0.65; arm.add(tool); R.root.add(arm); R.arm = arm;
+    return R;
   }
   function buildCookerRig() {
     const ck = rig(bCookerBody());
@@ -4473,6 +5198,10 @@ const R3 = (() => {
     }
     if (P.hurtT > 0) { const k = P.hurtT / 0.45; bRx = -0.35 * k; hRz = Math.sin(t * 40) * 0.15 * k; }
     if (P.burpT > 0) { sx += P.burpT * 0.6; sy -= P.burpT * 0.3; hRx = -0.45 * P.burpT / 0.6; aL = -2.2; aLz = -0.6; }
+    if (P.slurpT > 0) {
+      const k = P.slurpT; sx += Math.sin(k * Math.PI) * 0.22; hRx -= Math.sin(k * Math.PI) * 0.15;
+      if (k < 0.5) { aL = -0.8 + Math.sin(k * 30) * 0.18; aLz = -0.8; }
+    }
     if (launched) {
       const spin = G.phase === 'launch' && catapult?.state === 'fling';
       if (spin || (G.phase === 'drop' && P.z > 60)) { bRx = spin ? t * 9 : Math.sin(t * 3) * 0.3; aL = Math.sin(t * 28) * 2; aR = Math.cos(t * 28) * 2; lL = Math.sin(t * 24) * 1.1; lR = -lL; }
@@ -4486,12 +5215,23 @@ const R3 = (() => {
     if (menu) { aR = -0.9 + Math.sin(t * 2) * 0.1; if (Math.floor(t / 2.2) % 4 === 2) { aL = -2.6 + Math.sin(t * 10) * 0.4; } }
     pr.body.rotation.set(bRx, 0, bRz); pr.body.scale.set(sx, sy, sx); pr.body.position.set(bx, by, 0);
     pr.head.rotation.set(hRx, 0, hRz);
+    if (P.slurpT > 0) pr.head.scale.set(1 + Math.sin(P.slurpT * Math.PI) * 0.18, 1, 1 + Math.sin(P.slurpT * Math.PI) * 0.12); else pr.head.scale.setScalar(1);
     pr.eatingMouth.visible = eating && !dead && P.hurtT <= 0;
     if (pr.eatingMouth.visible) { const q = 0.55 + (P.eatKick || 0) * 0.85; pr.eatingMouth.scale.set(1.1 + q * 0.15, q, 1); pr.head.rotation.y = angDiff(P.aimA, P.biteA) * -0.45; }
     const k = 1 - Math.exp(-dt * 18);
     pr.arms[0].rotation.x = lerp(pr.arms[0].rotation.x, aL, rolling || launched ? 1 : k); pr.arms[0].rotation.z = lerp(pr.arms[0].rotation.z, aLz, k);
     pr.arms[1].rotation.x = lerp(pr.arms[1].rotation.x, aR, rolling || launched ? 1 : k); pr.arms[1].rotation.z = lerp(pr.arms[1].rotation.z, aRz, k);
     pr.arms.forEach((a, i) => { a.position.x = (i ? 1 : -1) * (9.6 + 4.2 * f); });
+    pr.spoon.visible = !!P.eatTarget && !rolling && !air && !launched && !dead;
+    if (pr.spoon.visible) {
+      const phase = P.spoonT % 0.36 / 0.36, reach = Math.sin(phase * Math.PI), yaw = pr.root.rotation.y;
+      const dx = (P.eatTarget.x - P.x) / 1.13, dz = (P.eatTarget.y - P.y) / 1.13;
+      const lx = Math.cos(yaw) * dx - Math.sin(yaw) * dz, lz = Math.sin(yaw) * dx + Math.cos(yaw) * dz;
+      const scoopH = groundH(P.eatTarget.x, P.eatTarget.y) / 1.13 + 4;
+      pr.spoon.position.set(lerp(-3, lx, reach), lerp(30, scoopH, reach) + Math.sin(phase * TAU) * 5, lerp(17, lz, reach));
+      pr.spoon.rotation.set(-0.2 + Math.cos(phase * TAU) * 0.22, Math.atan2(lx, lz), -0.18);
+      pr.spoonLoad.visible = phase > 0.5; pr.arms[0].rotation.x = -1.2 - reach * 0.8;
+    }
     pr.legs[0].rotation.x = lL; pr.legs[1].rotation.x = lR;
     pr.sprout.rotation.z = Math.sin(t * 6) * 0.2 + (moving ? -0.3 : 0) + (air ? 0.5 : 0);
     setFace(pr.head, playerFace(G, P, { rolling, launched, air, eating, firing: pr.fireT > 0 }));
@@ -4528,10 +5268,18 @@ const R3 = (() => {
         if (part.name === 'bolt') { mesh.visible = P.fireCd < WEAPONS[id].cd * 0.7; mesh.position.z -= Math.max(0, P.fireCd) * 10; }
         if (part.name === 'whiskHead') mesh.rotation.z += t * (P.whiskT > 0 ? 32 : 0);
         if (part.name === 'valve') { mesh.position.y += Math.sin(t * (P.muzzle > 0 ? 75 : 9)) * (P.muzzle > 0 ? 1.2 : 0.15); mesh.rotation.y += P.recoil * 0.08; }
+        if (part.name === 'mochiHead') {
+          const swing = P.attackT / 0.36; mesh.scale.set(1 + Math.sin(swing * Math.PI) * 0.5, 1 - Math.sin(swing * Math.PI) * 0.35, 1 + (w.held ? 0.35 : 0));
+          mesh.position.z += Math.sin(swing * Math.PI) * 9; mesh.rotation.z = Math.sin(t * 18) * (w.held ? 0.12 : 0);
+          pr.hand.rotation.y = Math.sin(swing * Math.PI * 1.5) * 0.8;
+        }
+        if (part.name === 'catchCup') { const bend = (w.caught || 0) / 12; mesh.scale.set(1 + bend * 0.15, 1 - bend * 0.35, 1 + bend * 0.25); mesh.position.y -= bend * 4; pr.hand.rotation.x -= (w.catchT > 0 ? 0.35 : 0); }
+        if (part.name === 'caughtBalls') { const n = w.caught || 0; mesh.visible = n > 0; mesh.scale.setScalar(0.5 + n / 18); mesh.position.y += Math.sin(t * 25) * 2; mesh.rotation.y = t * 5; }
+        if (part.name === 'sodaBody') { const k = P.attackT / 0.15; mesh.scale.set(1 + k * 0.18, 1 + k * 0.12, 1 - k * 0.13); mesh.position.z -= k * 3; }
       }
     }
     // 枪口火光（颜色跟着武器走）；寿司镭射蓄力时绿光越来越亮
-    const FL = { chili: '#ff7a2a', soy: '#c08a5a', sushi: '#9dff7a', steamer: '#ffffff', popcorn: '#ffe08a', cleaver: '#e0f0ff' };
+    const FL = { chili: '#ff7a2a', soy: '#c08a5a', sushi: '#9dff7a', steamer: '#ffffff', popcorn: '#ffe08a', cleaver: '#e0f0ff', vacuum: '#8cefff', ricochet: '#b2faff', soda: '#9eefff', cheese: '#ffe476', nori: '#c7f6a3' };
     const charge = P.charging || 0;
     pr.flash.visible = P.muzzle > 0 || charge > 0;
     if (pr.flash.visible) {
@@ -4622,14 +5370,24 @@ const R3 = (() => {
       if (e.state === 'leap') rx = 0.35;
       if (e.state === 'rest' && e.kind === 'chili') rx = -0.25;
       if (e.kind === 'pea' && e.burst > 0) rx = -0.2;
+      if (e.heldBy) { rz = Math.sin(t * 22) * 0.32; rx = -0.4; }
+      if (e.thrown) { rx = t * 16; rz = Math.sin(t * 22) * 0.2; }
+      if (e.kind === 'shrimp') { rx += e.state === 'coil' ? -0.5 : e.state === 'spring' ? 0.6 : 0; if (e.state === 'dizzy') rz = Math.sin(t * 13) * 0.3; }
+      if (e.kind === 'mushroom' && e.hitT > 0) hop += Math.sin(e.hitT * 36) * 4;
       const sc = (e.elite ? 1.3 : 1) * (e.chest ? 1 : 1);
-      const k = e.chest ? 'chest' : e.kind;
-      const m = instMatrix(e.x, e.z + st.gz, e.y, st.yaw, 12, rx, rz, 0, sc * (1 + sq * 0.18), sc * (1 - sq * 0.18), ox, hop);
+      const k = e.buried ? 'garlicMound' : e.kind === 'youtiao' && e.half ? 'youtiaoHalf' : e.chest ? 'chest' : e.kind;
+      const m = instMatrix(e.x, e.z + st.gz, e.y, st.yaw + (e.spinT > 0 ? e.spinT * 18 : 0), 12, rx, rz, 0, sc * (1 + sq * (e.kind === 'shrimp' ? 0.4 : 0.18)), sc * (1 - sq * 0.18), ox, hop);
       tint.setRGB(1, 1, 1);
       if (e.elite) tint.setRGB(1.05, 0.78, 0.72);
       if (e.slowT > 0) tint.setRGB(0.82, 0.68, 0.55);
+      if (e.cheeseT > 0) tint.setRGB(1.15, 0.95, 0.55);
+      if (e.freezeT > 0) tint.setRGB(0.7, 1.05, 1.3);
       if (e.flash > 0) tint.setRGB(2.6, 2.5, 2.3);
-      kindPut(k, m, tint, enemyFace(e, t));
+      kindPut(k, m, tint, e.freezeT > 0 || e.iceCrackT > 0 ? FACE.shock : enemyFace(e, t));
+      if (e.kind === 'mushroom') { const capY = e.state === 'capUp' ? 49 + Math.sin(e.st * 8) * 3 : 27; const cap = instMatrix(e.x, e.z + st.gz + capY + hop, e.y, st.yaw, 0, e.capFlipT > 0 ? Math.PI + Math.sin(t * 25) * 0.1 : 0, rz, 0, sc, sc); kindPut('mushroomCap', cap, tint); }
+      if (e.kind === 'carrier' && e.bagHp > 0) { const bag = instMatrix(e.x - Math.sin(st.yaw) * 20, e.z + st.gz + 30, e.y - Math.cos(st.yaw) * 20, st.yaw, 0, 0, Math.sin(e.t * 7) * 0.1, 0, 1, 1); kindPut('carrierBag', bag, tint); }
+      if (e.kind === 'shrimp') { const tail = instMatrix(e.x - Math.sin(st.yaw) * 20, e.z + st.gz + 13, e.y - Math.cos(st.yaw) * 20, st.yaw, 0, Math.sin(e.t * (e.state === 'dizzy' ? 30 : 8)) * 0.55, 0, 0, 1, 1); kindPut('shrimpTail', tail, tint); }
+      if (e.warn) warnAt(e.warn.x, e.warn.y, e.warn.r, clamp(e.st / (e.state === 'coil' ? 0.55 : 0.43), 0.1, 1));
       blob(e.x, e.y, e.r / (1 + e.z / 160), st.gz);
       if (e.stunT > 0 && starN < 88) for (let i = 0; i < 3; i++) { const a = t * 5 + i * TAU / 3; e3.set(0, a * 2, 0); q4.setFromEuler(e3); s3.setScalar(3.2); v3.set(e.x + Math.cos(a) * e.r * 0.9, e.z + st.gz + e.r * 2.6 + 6, e.y + Math.sin(a) * e.r * 0.9); m4.compose(v3, q4, s3); pools.stars.setMatrixAt(starN, m4); pools.stars.setColorAt(starN, col('#ffe14a')); starN++; }
       if ((e.kind === 'radish' && e.state === 'charge') || (e.kind === 'chili' && e.state === 'aim')) if (wi < warnSprites.length) { const s = warnSprites[wi++]; s.visible = true; s.position.set(e.x, e.z + st.gz + 58, e.y); s.scale.set(14, 21 * (1 + Math.sin(t * 30) * 0.08), 1); }
@@ -4661,6 +5419,15 @@ const R3 = (() => {
     }
     if (e.kind === 'eggqueen' && s === 'spin') ry = e.spinA * 2;
     if (e.kind === 'porkking') { if (s === 'roll') { st.roll += dt * 12; rx = st.roll; yaw = Math.atan2(e.vx, e.vy); } else st.roll = 0; }
+    if (e.kind === 'fryer') {
+      const warn = s === 'tiltWarn', tilted = s === 'tilt';
+      Rg.pan.rotation.z = tilted ? 0.24 : warn ? Math.min(1, e.st / 1.1) * 0.12 : (G.panTilt || 0) * 0.8;
+      Rg.pan.rotation.x = tilted ? Math.sin(e.tiltA) * 0.12 : 0;
+      Rg.arm.rotation.x = s === 'wallPull' ? -1.2 + Math.sin(e.st * 4) * 0.4 : s === 'ramWarn' ? -1.45 : s === 'ram' ? 0.6 : -0.2;
+      Rg.arm.rotation.z = warn ? Math.sin(t * 24) * 0.08 : 0;
+      if (s === 'ramWarn') { rx = -0.15; ox = Math.sin(t * 55) * 2; }
+      if (s === 'ram') rx = 0.18;
+    }
     if (e.kind === 'cooker') {
       const p = (e.pressure || 0) / 100;
       const shake = s === 'whistle' ? 3 : s === 'jetWarn' ? 1.5 : p > 0.75 ? 0.8 : 0;
@@ -4755,6 +5522,8 @@ const R3 = (() => {
           const fill = new THREE.Mesh(GEO.disc, MAT.warnFill); md.add(fill); md.userData.fill = fill; md.position.y = 3;
         } else if (z.kind === 'steam') {
           const r = new THREE.Mesh(GEO.ring, MAT.steamRing); md.add(r); md.userData.ring = r; md.position.y = 3;
+        } else if (z.kind === 'wind') {
+          for (let i = 0; i < 3; i++) { const ring = new THREE.Mesh(GEO.ring, MAT.aimRing); ring.scale.setScalar(0.4 + i * 0.27); ring.position.y = 5 + i * 13; md.add(ring); }
         } else if (z.kind === 'pepper') {
           const d = new THREE.Mesh(GEO.disc, MAT.pepper); md.add(d); md.position.y = 2;
         }
@@ -4768,6 +5537,10 @@ const R3 = (() => {
       if (z.kind === 'fire') md.children.forEach((c, i) => { if (i) c.scale.y = 0.4 + 0.25 * Math.sin(t * 18 + i * 2); });
       if (z.kind === 'oilWarn' || z.kind === 'riseWarn') { md.userData.fill.scale.setScalar(Math.min(1, z.t / z.dur)); md.visible = !z.done; }
       if (z.kind === 'curry') md.children[0].position.y = Math.sin(t * 2 + z.seed * 9) * 0.004;
+      if (z.kind === 'wind') {
+        md.scale.set(z.r, 1, z.r); md.rotation.y = t * 0.8;
+        for (let i = 0; i < 3; i++) { const a = t * 2 + i * TAU / 3; spark(z.x + Math.cos(a) * z.r * 0.7, 10 + i * 8, z.y + Math.sin(a) * z.r * 0.7, 5, '#a1f4ba'); }
+      }
       if (z.kind === 'steam') { const k = z.t / z.dur; md.userData.ring.scale.setScalar(0.6 + 0.4 * k); MAT.steamRing.opacity = 0.25 + 0.35 * Math.abs(Math.sin(t * 6)); if (Math.random() < 0.3) spark(z.x + rnd(-z.r, z.r) * 0.6, 10 + rnd(0, 40), z.y + rnd(-z.r, z.r) * 0.6, rnd(5, 9), '#ffffff'); }
       if (z.kind === 'pepper' && Math.random() < 0.8) { const a = rnd(0, TAU), d = rnd(0, z.r); spark(z.x + Math.cos(a) * d, rnd(5, 50), z.y + Math.sin(a) * d, rnd(1.5, 3), '#5a4a3a'); }
     }
@@ -4800,12 +5573,17 @@ const R3 = (() => {
         const length = clamp(Math.hypot(b.vx, b.vy) * 0.038, 15, 46), e = camera.matrixWorld.elements, angle = Math.atan2(dx * e[4] + dz * e[6], dx * e[0] + dz * e[2]);
         effect(0, b.x - dx * length * 0.5, h, b.y - dz * length * 0.5, length, vis === 'soy' ? b.r * 1.5 : Math.max(3, b.r * 0.8), angle, vis === 'soy' ? '#b66b28' : vis === 'cleaver' ? '#d6efff' : vis === 'kernel' ? '#ffd768' : '#fff1bc', clamp(b.life / b.max * 2, 0.25, 0.8));
       }
-      if (vis === 'chop') { if (nC >= 120) continue; q4.setFromUnitVectors(UP, v3); s3.set(1.1, 20, 1.1); v3b.set(b.x, h, b.y); m4.compose(v3b, q4, s3); pools.bChop.setMatrixAt(nC++, m4); }
+      if (vis === 'nori') { e3.set(0, b.spin * 1.6, 0); q4.setFromEuler(e3); s3.setScalar(1); v3b.set(b.x, h, b.y); m4.compose(v3b, q4, s3); kindPut(b.returned && dist2(b.x, b.y, G.p.x, G.p.y) < 120 ** 2 ? 'noriRoll' : 'noriP', m4); continue; }
+      else if (vis === 'cap') { e3.set(b.spin, b.spin * 1.5, 0); q4.setFromEuler(e3); s3.setScalar(1); v3b.set(b.x, h, b.y); m4.compose(v3b, q4, s3); kindPut('capP', m4); spark(b.x, h, b.y, 3, '#c7f5ff'); continue; }
+      else if (vis === 'cheese' || vis === 'meatball') { e3.set(b.spin * 0.4, b.spin, 0); q4.setFromEuler(e3); s3.setScalar(b.r); v3b.set(b.x, h, b.y); m4.compose(v3b, q4, s3); kindPut(vis === 'cheese' ? 'cheeseP' : 'meatballP', m4); continue; }
+      else if (vis === 'chop') { if (nC >= 120) continue; q4.setFromUnitVectors(UP, v3); s3.set(1.1, 20, 1.1); v3b.set(b.x, h, b.y); m4.compose(v3b, q4, s3); pools.bChop.setMatrixAt(nC++, m4); }
       else if (vis === 'soy') { if (nS >= 180) continue; q4.setFromUnitVectors(UP, v3); s3.set(b.r * 0.8, b.r * 1.6, b.r * 0.8); v3b.set(b.x, h, b.y); m4.compose(v3b, q4, s3); pools.bSoy.setMatrixAt(nS++, m4); }
       else if (vis === 'flame') { if (nF >= 220) continue; const k = 1 - b.life / b.max; q4.identity(); s3.setScalar(b.r * (0.7 + k * 0.6)); v3b.set(b.x, h + k * 14, b.y); m4.compose(v3b, q4, s3); pools.bFlame.setMatrixAt(nF++, m4); effect(4, b.x, h + k * 14, b.y, b.r * 3.5, b.r * 3.5, b.spin, k < 0.3 ? '#ffe4a0' : '#ff8d38', (1 - k) * 0.55); if (k < 0.5) spark(b.x, h, b.y, b.r * 0.5, '#fff2a0'); continue; }
       else if (vis === 'kernel') { if (nK >= 60) continue; e3.set(b.spin, b.spin * 0.7, 0); q4.setFromEuler(e3); s3.setScalar(b.r * 0.95); v3b.set(b.x, h, b.y); m4.compose(v3b, q4, s3); pools.bKernel.setMatrixAt(nK++, m4); }
       else if (vis === 'pop') { e3.set(b.spin, b.spin, 0); q4.setFromEuler(e3); s3.setScalar(1.1); v3b.set(b.x, h, b.y); m4.compose(v3b, q4, s3); kindPut('pop', m4); continue; }
       else if (vis === 'pin') { const m = instMatrix(b.x, h - 7, b.y, Math.atan2(dx, dz), 7, b.spin, 0, 0, 1, 1, 0, 0); kindPut('pin', m); blob(b.x, b.y, 14); continue; }
+      else if (vis === 'disc') { e3.set(0.18, b.spin * 1.5, 0); q4.setFromEuler(e3); s3.setScalar(1); v3b.set(b.x, h, b.y); m4.compose(v3b, q4, s3); kindPut('discP', m4); effect(2, b.x, h, b.y, 29, 17, b.spin, '#a6f4ff', 0.6); continue; }
+      else if (vis === 'scoop') { if (nG >= 220) continue; q4.setFromUnitVectors(UP, v3); s3.setScalar(b.r / 4); v3b.set(b.x, h, b.y); m4.compose(v3b, q4, s3); pools.bGrain.setMatrixAt(nG++, m4); effect(2, b.x, h, b.y, 18, 14, b.spin, '#8fefff', 0.65); continue; }
       else if (vis === 'cleaver') { e3.set(0, b.spin * 1.4, 0); q4.setFromEuler(e3); s3.setScalar(1); v3b.set(b.x, h, b.y); m4.compose(v3b, q4, s3); kindPut('cleaverP', m4); spark(b.x - dx * 8, h, b.y - dz * 8, 3, '#d8ecff'); continue; }
       else { if (nG >= 220) continue; q4.setFromUnitVectors(UP, v3); e3.set(Math.sin(b.spin) * 0.4, 0, b.spin * 0.6); fxQuaternion.setFromEuler(e3); q4.multiply(fxQuaternion); const s = vis === 'pellet' ? 1.6 : vis === 'reflect' ? 2 : 1.25 * b.r / 5; s3.setScalar(s); v3b.set(b.x, h, b.y); m4.compose(v3b, q4, s3); pools.bGrain.setMatrixAt(nG++, m4); if (vis === 'reflect') spark(b.x, h, b.y, 7, '#ffd34d'); }
     }
@@ -4962,7 +5740,7 @@ const R3 = (() => {
         tc = true;
       }
       if (e.kind === 'spatula' && (e.state === 'hover' || e.state === 'slam' || e.state === 'rise')) { warnAt(e.x, e.y, 110, e.state === 'slam' ? 1 : e.state === 'hover' ? e.st / ((e.phase2 ? 0.8 : 1.05)) : 0.05, 0); }
-      if ((e.state === 'aim' || e.state === 'windup') && li < teleLines.length) {
+      if ((e.state === 'aim' || e.state === 'windup' || e.state === 'ramWarn') && li < teleLines.length) {
         const l = teleLines[li++], len = e.teleLen || (e.type === 'boss' ? 700 : 300), w = e.teleW || (e.type === 'boss' ? e.r * 1.8 : 26);
         l.visible = true; l.position.set(e.x + e.lx * len / 2, 3, e.y + e.ly * len / 2);
         l.rotation.y = -Math.atan2(e.ly, e.lx); l.scale.set(len, 1, w);
@@ -5071,10 +5849,10 @@ const R3 = (() => {
       if (G.restT < 3.4) { tx = G.cat.x; ty = G.cat.y; dist = D * 0.8; }
     }
     if (G.phase === 'launch') { tx = P.x; ty = P.y; dist = D * (G.cat?.state === 'wind' ? 0.72 : 1.1); }
-    const mode = G.interference?.kind === 'flip' ? 'flip' : G.cat && G.phase === 'rest' ? 'rest' : G.phase === 'launch' ? 'launch' : 'normal';
+    const mode = G.interference?.kind === 'flip' ? 'flip' : G.cat && G.phase === 'rest' ? 'rest' : G.phase === 'launch' ? 'launch' : G.boss?.kind === 'fryer' ? 'tilt' : 'normal';
     if (mode !== patchMode) {
       if (!basePatch) basePatch = { ...patch };
-      const f = mode === 'rest' ? 1.4 : mode === 'launch' ? 1.25 : 1;
+      const f = mode === 'rest' ? 1.4 : mode === 'launch' ? 1.25 : mode === 'tilt' ? 1.18 : 1;
       patch = { cx: basePatch.cx * f, cz: basePatch.cz * f, w: basePatch.w * f, h: basePatch.h * f };
       if (mode === 'flip') { const side = Math.hypot(basePatch.w, basePatch.h) + Math.abs(basePatch.cz) * 2; patch.w = patch.h = side; patch.cx = patch.cz = 0; }
       patchMode = mode; buildRicePatch(); grainKey = '';
@@ -5089,7 +5867,7 @@ const R3 = (() => {
     const cd = camera.userData.dist = lerp(camera.userData.dist || dist, dist, 1 - Math.exp(-dt * 3));
     camera.position.set(camTarget.x + Math.sin(yaw) * Math.cos(ELEV) * cd, Math.sin(ELEV) * cd, camTarget.z + Math.cos(yaw) * Math.cos(ELEV) * cd).add(camShake);
     camera.lookAt(camTarget.x + camShake.x * 0.5, 0, camTarget.z + camShake.z * 0.5);
-    viewRoll = lerp(viewRoll, G.sceneRoll || 0, 1 - Math.exp(-dt * 16));
+    viewRoll = lerp(viewRoll, (G.sceneRoll || 0) + (G.panTilt || 0) * Math.cos(G.panTiltA + 0.3) * Settings.motion, 1 - Math.exp(-dt * 16));
     if (Math.abs(viewRoll) < 0.0001) viewRoll = 0;
     camera.rotateZ(viewRoll);
     const lx = shadowCache.enabled ? Math.round(camTarget.x / 32) * 32 : camTarget.x, lz = shadowCache.enabled ? Math.round(camTarget.z / 32) * 32 : camTarget.z;
@@ -5107,8 +5885,39 @@ const R3 = (() => {
     occU.uOccOn.value = menu ? 0 : 1;
   }
   let wasMenuPreview = false;
+  function syncKitchenFx() {
+    const G = Game; let threads = 0, shells = 0, traces = 0;
+    const thread = (x, y, z, xx, yy, zz, radius, color) => {
+      if (threads >= 48) return;
+      v3.set(xx - x, yy - y, zz - z); const length = v3.length(); if (length < 0.1) return;
+      q4.setFromUnitVectors(UP, v3.normalize()); s3.set(radius, length, radius); v3b.set((x + xx) / 2, (y + yy) / 2, (z + zz) / 2); m4.compose(v3b, q4, s3);
+      pools.threads.setMatrixAt(threads, m4); pools.threads.setColorAt(threads++, col(color));
+    };
+    for (const link of G.cheeseLinks) {
+      const a = link.a, b = link.b, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, d = Math.hypot(a.x - b.x, a.y - b.y), h = 21 + Math.sin(G.real * 24) * clamp(d / 60, 0.5, 3);
+      thread(a.x, a.z + 22, a.y, mx, h, my, 1.8, '#ffdc69'); thread(mx, h, my, b.x, b.z + 22, b.y, 1.8, '#ffe792');
+    }
+    for (const w of G.p.weps) if (w?.held && !w.held.dead) {
+      const e = w.held, P = G.p, x = P.x + Math.cos(P.aimA) * 38, y = P.y + Math.sin(P.aimA) * 38;
+      thread(x, P.z + 30, y, e.x, e.z + 12, e.y, 3, '#fff1e4');
+      thread(x + 3, P.z + 29, y + 2, e.x + 4, e.z + 10, e.y, 1.4, '#ffd6cf');
+    }
+    for (const e of G.enemies) if (!e.dead && (e.freezeT > 0 || e.armor > 0) && shells < 48) {
+      q4.identity(); const r = e.r * 1.25; s3.set(r, r * 1.15, r); v3b.set(e.x, e.z + r, e.y); m4.compose(v3b, q4, s3); pools.shells.setMatrixAt(shells++, m4);
+    }
+    for (const mark of G.traces) {
+      q4.identity(); const s = mark.r * (1 - mark.t / mark.dur * 0.2); s3.set(s, 1, s); v3b.set(mark.x, groundH(mark.x, mark.y) + 0.9, mark.y); m4.compose(v3b, q4, s3); pools.traces.setMatrixAt(traces++, m4);
+    }
+    for (const m of G.mines) {
+      const angle = m.state === 'flip' ? m.st / 0.26 * Math.PI : 0;
+      const matrix = instMatrix(m.x, m.z + groundH(m.x, m.y), m.y, 0, 0, angle, 0, 0, 1, 1); kindPut('gyozaP', matrix);
+      if (m.state === 'armed') effect(2, m.x, m.z + 9, m.y, 24, 10, G.real, '#ffcc68', 0.25 + Math.sin(G.real * 9) * 0.1);
+      if (m.state === 'flip') spark(m.x, 8 + m.z, m.y, 15, '#ffda7d');
+    }
+    poolDone(pools.threads, threads); poolDone(pools.shells, shells); poolDone(pools.traces, traces);
+  }
   function clearCombatDisplay() {
-    for (const name of ['bGrain', 'bChop', 'bSoy', 'bFlame', 'bKernel', 'trail', 'aimRing', 'orb', 'beam', 'lootRing', 'grain', 'chunk', 'puff']) poolDone(pools[name], 0);
+    for (const name of ['bGrain', 'bChop', 'bSoy', 'bFlame', 'bKernel', 'trail', 'aimRing', 'orb', 'beam', 'lootRing', 'grain', 'chunk', 'puff', 'threads', 'shells', 'traces']) poolDone(pools[name], 0);
     for (const m of [teleCircle, teleFill, ...teleLines, ...swingM, ...coneM, ...jetM]) m.visible = false;
     for (const b of beamM) b.core.visible = b.glow.visible = false;
     for (const b of boomM) b.m.visible = b.c.visible = false;
@@ -5129,7 +5938,7 @@ const R3 = (() => {
     syncCamera(dt); syncVisibility(); syncRiceTiles(); syncSurfaceCache();
     syncPlayer(dt); syncEnemies(dt); syncObstacles(); syncHazards();
     if (menuPreview) metrics.menuFrames++;
-    else { syncZones(); syncProjectiles(); syncPickups(); syncParticles(); syncFx(); }
+    else { syncZones(); syncProjectiles(); syncPickups(); syncParticles(); syncFx(); syncKitchenFx(); }
     syncGrains();
     poolDone(pools.blob, blobN); poolDone(pools.spark, sparkN); poolDone(pools.stars, starN); poolDone(pools.warnRing, warnN); poolDone(pools.warnFill, warnN);
     kindsFlush();
@@ -5170,7 +5979,7 @@ const HUD = (() => {
   const BODY = '"Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei","WenQuanYi Zen Hei",sans-serif';
   const INK = 'rgba(58,26,8,0.92)';
   const MID_NAMES = { eggqueen: '荷包蛋女王', porkking: '红烧肉大王' };
-  const SIDE_CH = { ham: '腿', nori: '苔', pea: '豆', sesame: '芝', drum: '鸡', scallion: '葱', ume: '梅', corn: '玉', yolk: '黄' };
+  const SIDE_CH = { ham: '腿', nori: '苔', pea: '豆', sesame: '芝', drum: '鸡', scallion: '葱', ume: '梅', corn: '玉', yolk: '黄', clock: '时', magnet: '吸', frenzy: '辣', feast: '饭' };
   let vignette = null, vigKey = '', bossBarsBottom = 0;
   function init(context) { ctx = context; }
   function resize(w, h) { W = w; H = h; clearCache(); }
@@ -5186,6 +5995,16 @@ const HUD = (() => {
     ctx.textAlign = align || 'left'; ctx.textBaseline = 'middle';
     if (stroke !== false) { ctx.lineWidth = Math.max(3, size / 4.5); ctx.strokeStyle = INK; ctx.lineJoin = 'round'; ctx.strokeText(txt, x, y); }
     ctx.fillStyle = color || '#fff'; ctx.fillText(txt, x, y);
+  }
+  function wrapLabel(txt, x, y, size, width, color) {
+    ctx.font = `700 ${size}px ${BODY}`;
+    const lines = []; let line = '';
+    for (const ch of txt) {
+      if (line && ctx.measureText(line + ch).width > width) { lines.push(line); line = ch; }
+      else line += ch;
+    }
+    if (line) lines.push(line);
+    lines.forEach((v, i) => label(v, x, y + i * size * 1.6, size, color, 'center', true, BODY));
   }
   function bar(x, y, w, h, k, c1, c2) {
     cachedRegion('bar-frame', x - 4, y - 4, w + 8, h + 8, () => {
@@ -5225,6 +6044,35 @@ const HUD = (() => {
     ctx.save(); ctx.translate(x, y); ctx.scale(r / 20, r / 20); wob = id.length * 3.1;
     stroke(2.6);
     switch (id) {
+      case 'mochi':
+        ctx.rotate(-0.45); ctx.fillStyle = '#ab7442'; rrect(-2, -1, 4, 23, 2); ctx.fill(); ctx.stroke();
+        blob(0, -8, 18, 9, '#fff1dd'); blob(-14, -8, 4, 7, '#ffc6c5'); blob(14, -8, 4, 7, '#ffc6c5'); break;
+      case 'nori':
+        stroke(9, '#315c40'); ctx.beginPath(); ctx.arc(0, 0, 12, -0.45, Math.PI * 1.3); ctx.stroke();
+        for (let i = 0; i < 6; i++) { const a = -0.4 + i * 0.7; stroke(1, '#dcc8a4'); blob(Math.cos(a) * 14, Math.sin(a) * 14, 2, 1, '#fff4d9', a); } break;
+      case 'strainer':
+        ctx.rotate(-0.35); ctx.fillStyle = '#9c673b'; rrect(-2, 0, 4, 22, 2); ctx.fill(); ctx.stroke();
+        blob(0, -8, 15, 11, '#aebdc1'); stroke(1.3, '#f1fafb');
+        for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(i * 4, -16); ctx.lineTo(i * 4, 0); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-12, -8 + i * 3); ctx.lineTo(12, -8 + i * 3); ctx.stroke(); } break;
+      case 'cheese':
+        ctx.fillStyle = '#ffce50'; rrect(-15, -6, 22, 13, 4); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#fff1bf'; rrect(-9, 5, 7, 12, 3); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#d99a2c'; ctx.beginPath(); ctx.moveTo(7, -5); ctx.lineTo(20, -1); ctx.lineTo(20, 3); ctx.lineTo(7, 7); ctx.closePath(); ctx.fill(); ctx.stroke();
+        blob(-7, -1, 2, 2, '#b77b29'); break;
+      case 'soda':
+        ctx.rotate(-0.6); ctx.fillStyle = '#67b9e2'; rrect(-8, -7, 16, 25, 7); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#b8e8f7'; rrect(-4, -17, 8, 11, 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#ffd779'; rrect(-6, -20, 12, 4, 1); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#fff2c9'; rrect(-8, 0, 16, 7, 1); ctx.fill();
+        for (let i = 0; i < 3; i++) blob(-3 + i * 3, 11 - i * 3, 1.4, 1.4, '#e0fbff'); break;
+      case 'gyoza':
+        blob(0, 2, 18, 10, '#ffe3a5'); stroke(3, '#b87331'); ctx.beginPath(); ctx.ellipse(0, 6, 15, 4, 0, 0, Math.PI); ctx.stroke();
+        stroke(2, '#d99d55'); for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(i * 5, -5); ctx.lineTo(i * 4, 2); ctx.stroke(); } break;
+      case 'ricochet':
+        blob(0, 1, 16, 11, '#c8e0ef'); stroke(2.5, '#ffc759'); ctx.beginPath(); ctx.ellipse(0, 1, 14, 9, 0, 0, TAU); ctx.stroke();
+        stroke(2.6); ctx.fillStyle = '#3f454c'; rrect(-6, -8, 12, 5, 2); ctx.fill(); ctx.stroke();
+        stroke(2, '#9beeff'); ctx.beginPath(); ctx.arc(0, 0, 20, -0.4, 1.5); ctx.stroke(); break;
+      case 'vacuum':
+        ctx.rotate(-0.45); ctx.fillStyle = '#79c9ef'; rrect(-3, -2, 6, 22, 3); ctx.fill(); ctx.stroke();
+        blob(0, -9, 11, 9, '#c8e3f2'); stroke(2, '#8deaff'); ctx.beginPath(); ctx.arc(0, -9, 7, 0, TAU); ctx.stroke();
+        stroke(2); blob(0, -9, 4, 2.5, '#fff6d9'); break;
       case 'chopbow':
         ctx.beginPath(); ctx.moveTo(-14, -6); ctx.quadraticCurveTo(0, 8, 14, -6); ctx.strokeStyle = INK; ctx.lineWidth = 5; ctx.stroke(); ctx.strokeStyle = '#c98a4a'; ctx.lineWidth = 3; ctx.stroke();
         stroke(2.6); ctx.beginPath(); ctx.moveTo(-14, -6); ctx.lineTo(14, -6); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
@@ -5344,11 +6192,12 @@ const HUD = (() => {
     drawWorldLabels();
     drawWorldText();
     drawScreenFx();
-    if (G.state === 'play' || G.state === 'pause') drawHUD();
+    if (G.state === 'play' || G.state === 'pause' || G.state === 'weapon') drawHUD();
     if (G.banner && G.state !== 'over') drawBanner(G.banner);
     if (G.state === 'play' && !touchUI()) drawCrosshair();
     if (G.state === 'pause') drawPause();
     if (G.state === 'layout') drawLayoutEditor();
+    if (G.state === 'weapon') drawWeaponInfo();
     if (G.state === 'over') drawOver();
   }
   function drawWorldText() {
@@ -5384,11 +6233,10 @@ const HUD = (() => {
       label(Wp.name, p.x, p.y, fs, '#4a2a10', 'center', false);
       label(R.name, p.x, by - 8 * s, 10.5 * s, R.col, 'center', true, BODY);
       if (near) {
-        const t = touchUI() ? '↥' : 'F';
+        const t = touchUI() ? '点「拾取」' : 'F 拾取';
         const bob = Math.sin(G.real * 6) * 2;
         label(t, p.x, by + bh + 13 * s + bob, 12.5 * s, '#ffe27a', 'center', true, BODY);
-        ctx.font = `700 ${11 * s}px ${BODY}`;
-
+        wrapLabel(Wp.desc, clamp(p.x, Math.min(140, W / 2), Math.max(W - 140, W / 2)), by - 30 * s, 11 * s, Math.min(280, W - 24), '#fff3d3');
       }
     }
     ctx.globalAlpha = 1;
@@ -5415,8 +6263,8 @@ const HUD = (() => {
       const c = G.cat, p = proj(c.x, c.y, 160), bob = Math.sin(G.real * 5) * 4;
       const on = p.x > 30 && p.x < W - 30 && p.y > 60 && p.y < H - 60;
       if (on) {
-        label('弹射勺', p.x, p.y - 18 * s + bob, 17 * s, '#ffe27a', 'center');
-
+        label('走到弹射勺', p.x, p.y - 18 * s + bob, 20 * s, '#ffe27a', 'center');
+        label(G.catNear ? (touchUI() ? '点「上勺」起飞' : '按 F 起飞') : '前往下一锅', p.x, p.y + 2 * s + bob, 12 * s, '#ffffff', 'center', true, BODY);
         ctx.fillStyle = '#ffe27a'; ctx.strokeStyle = INK; ctx.lineWidth = 3;
         ctx.beginPath(); ctx.moveTo(p.x - 9 * s, p.y + 14 * s + bob); ctx.lineTo(p.x + 9 * s, p.y + 14 * s + bob); ctx.lineTo(p.x, p.y + 26 * s + bob); ctx.closePath(); ctx.stroke(); ctx.fill();
       } else {
@@ -5429,6 +6277,17 @@ const HUD = (() => {
         label('弹射勺', ex - Math.cos(a) * 34 * s, ey - Math.sin(a) * 30 * s, 12 * s, '#fff', 'center', true, BODY);
       }
     }
+    for (const u of G.pickups) if (u.kind === 'side' && !u.got && dist2(P.x, P.y, u.x, u.y) < 140 ** 2) {
+      const d = SIDES[u.sid], p = proj(u.x, u.y, 35 + u.z);
+      cachedLabel(d.name, p.x, p.y, 11 * s, d.col, 'center', true, BODY);
+    }
+    if (G.refillRice) {
+      const rice = G.refillRice, p = proj(rice.x, rice.y, 65), x = clamp(p.x, 35, W - 35), y = clamp(p.y, H * 0.28, H - Settings.safe.bottom - 155 * s);
+      const a = Math.atan2(p.y - H / 2, p.x - W / 2), off = p.x !== x || p.y !== y;
+      if (off) { ctx.save(); ctx.translate(x, y); ctx.rotate(a); stroke(4, '#98e8ff'); ctx.beginPath(); ctx.moveTo(-12, -8); ctx.lineTo(2, 0); ctx.lineTo(-12, 8); ctx.stroke(); ctx.restore(); }
+      else { stroke(2.5, '#98e8ff'); ctx.beginPath(); ctx.arc(x, y + 18, 17 + Math.sin(G.real * 5) * 3, 0, TAU); ctx.stroke(); }
+      label('米饭补弹', x, y - 14, 12 * s, '#a8efff', 'center');
+    }
   }
   function drawScreenFx() {
     const G = Game, P = G.p;
@@ -5439,6 +6298,10 @@ const HUD = (() => {
       vignette.addColorStop(0, 'rgba(30,14,0,0)'); vignette.addColorStop(1, 'rgba(30,14,0,0.34)');
     }
     ctx.fillStyle = vignette; ctx.fillRect(0, 0, W, H);
+    if (P?.buffs.clock > 0) {
+      stroke(3, 'rgba(127,222,255,0.5)'); rrect(5, 5, W - 10, H - 10, 20); ctx.stroke();
+      const p = proj(P.x, P.y, 2); stroke(2, '#a1ecff'); ctx.beginPath(); ctx.ellipse(p.x, p.y, 32, 13, 0, G.real, G.real + Math.PI * 1.7); ctx.stroke();
+    }
     if (G.darkness > 0.01) {
       const p = proj(P.x, P.y, 20), radius = Math.min(W, H) * 0.38;
       const shadow = ctx.createRadialGradient(p.x, p.y, radius * 0.15, p.x, p.y, radius);
@@ -5510,9 +6373,14 @@ const HUD = (() => {
     iconButton(L.pause, 'pause', '#f7e6c5');
     glyph('pause', L.pause.x, L.pause.y, 13 * s, '#663d22');
     iconButton(L.auto, 'auto', Settings.auto(tch) ? '#db9b31' : '#8c8171');
+    iconButton(L.aim, 'target', Settings.aim(tch) ? '#5f9eaf' : '#8c8171');
+    cachedLabel('自动射击 ' + (Settings.auto(tch) ? '开' : '关'), L.auto.x, L.auto.y + L.auto.r + 10 * s, 9 * s, '#fff1cf', 'center', true, BODY);
+    cachedLabel('自动瞄准 ' + (Settings.aim(tch) ? '开' : '关'), L.aim.x, L.aim.y + L.aim.r + 10 * s, 9 * s, '#fff1cf', 'center', true, BODY);
+    cachedLabel('暂停', L.pause.x, L.pause.y + L.pause.r + 10 * s, 9 * s, '#fff1cf', 'center', true, BODY);
     if (Settings.auto(tch)) { ctx.fillStyle = '#a6ec91'; ctx.beginPath(); ctx.arc(L.auto.x + 13 * s, L.auto.y - 14 * s, 4 * s, 0, TAU); ctx.fill(); }
     drawPotProgress(L, s, top); drawBossBars(L, s, top); drawWeapons(L, s, tch);
     if (tch) drawTouch(L, s); else drawUltChip(s);
+    drawContext(L);
   }
   function face(x, y, r) {
     const G = Game, P = G.p, hurt = P.hurtT > 0 || G.hurtFlash > 0.05, happy = P.chew > 0 || P.burpT > 0, low = P.hp / P.maxHp < 0.3, blink = Math.sin(G.real * 1.3) > 0.97;
@@ -5538,14 +6406,16 @@ const HUD = (() => {
   function drawPotProgress(L, s, top) {
     const G = Game, cx = W / 2, y = L.portrait ? top + 92 * s : top + 14 * s;
     // 三只小碗：吃完的打勾，正在吃的冒热气
-    for (let i = 0; i < 3; i++) {
-      const x = cx + (i - 1) * 30 * s, r = 10 * s, cur = i === G.pot, done = i < G.pot;
+    const compact = !L.portrait && W < 760;
+    if (compact) cachedLabel(`${G.pot + 1} / ${POTS.length} 锅`, cx, y - 2 * s, 13 * s, '#ffe9bd', 'center', true, BODY);
+    for (let i = 0; i < (compact ? 0 : POTS.length); i++) {
+      const x = cx + (i - (POTS.length - 1) / 2) * 27 * s, r = 9 * s, cur = i === G.pot, done = i < G.pot;
       ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(x, y, r + 3, 0, Math.PI); ctx.lineTo(x - r - 3, y - 2); ctx.fill();
       ctx.fillStyle = done ? '#9a8a78' : POTS[i].look.accent; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI); ctx.closePath(); ctx.fill();
       if (!done) { ctx.fillStyle = POTS[i].look.rice; ctx.beginPath(); ctx.ellipse(x, y - 1, r, r * 0.5, 0, Math.PI, TAU); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 1.5; ctx.stroke(); }
       if (done) { stroke(2.5 * s, '#9dffb0'); ctx.beginPath(); ctx.moveTo(x - 5 * s, y - 2 * s); ctx.lineTo(x - 1 * s, y + 3 * s); ctx.lineTo(x + 6 * s, y - 6 * s); ctx.stroke(); }
       if (cur) { stroke(2 * s, 'rgba(255,255,255,0.8)'); const t = G.real * 2; for (let k = -1; k <= 1; k += 2) { ctx.beginPath(); ctx.moveTo(x + k * 3 * s, y - 6 * s); ctx.quadraticCurveTo(x + k * 3 * s + Math.sin(t + k) * 4 * s, y - 11 * s, x + k * 3 * s, y - 16 * s); ctx.stroke(); } }
-      if (i < 2) { ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.arc(x + 15 * s, y + 2 * s, 1.8 * s, 0, TAU); ctx.fill(); }
+      if (i < POTS.length - 1) { ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.arc(x + 13.5 * s, y + 2 * s, 1.5 * s, 0, TAU); ctx.fill(); }
     }
     let sub = '', col = '#ffe9c0';
     const t = G.t;
@@ -5554,7 +6424,7 @@ const HUD = (() => {
       const left = G.bossAt + CFG.COLD - t, enr = t > G.bossAt + CFG.ENRAGE;
       sub = enr ? `饭凉 ${fmt(left)}` : `狂暴 ${fmt(G.bossAt + CFG.ENRAGE - t)}`;
       col = enr ? (Math.sin(G.real * 8) > 0 ? '#ff7a6a' : '#ffd0c0') : '#ffc0a8';
-    } else if (G.phase === 'rest') { sub = '饭后时间'; col = '#9dffb0'; }
+    } else if (G.phase === 'rest') { sub = '已通关 · 前往弹射勺'; col = '#9dffb0'; }
     else if (G.phase === 'launch') sub = '起飞！';
     else if (G.phase === 'drop') sub = `落进 ${G.L.name}`;
     cachedLabel(sub, cx, y + 22 * s, 12 * s, col, 'center', true, BODY);
@@ -5607,6 +6477,10 @@ const HUD = (() => {
         }
         if (wp.cost && P.full < wp.cost * P.s.costMul) { ctx.globalAlpha = 0.5; disc(b.x, b.y, r, '#557c96'); ctx.globalAlpha = 1; }
       }
+      if (w.remaining > 0) {
+        stroke(3, '#8fe8ff'); ctx.beginPath(); ctx.arc(b.x, b.y, r + 4, -Math.PI / 2, -Math.PI / 2 + TAU * w.remaining / wp.duration); ctx.stroke();
+        label(Math.ceil(w.remaining) + '秒', b.x, b.y + r + 12 * s, 11 * s, '#a1edff', 'center', true, BODY);
+      }
     });
   }
   function ultState() {
@@ -5647,10 +6521,137 @@ const HUD = (() => {
     iconButton(L.jump, 'jump', '#6fa86c', P.z <= 0);
     iconButton(L.dash, 'dash', '#5f96b9', P.dashCd <= 0, 1 - P.dashCd / 0.9);
     iconButton(L.ult, 'burp', '#d9913b', G.ultReady(), P.ultCdT > 0 ? 1 - P.ultCdT / P.s.ultCd : P.full / P.s.ultThresh);
-    if (G.near || G.catNear) iconButton(L.use, G.catNear && !G.near ? 'jump' : 'use', '#e0b04b');
+    for (const [key, name] of [['jump', '跳跃'], ['dash', '翻滚'], ['ult', '饱嗝']]) cachedLabel(name, L[key].x, L[key].y + L[key].r * 0.64, 10 * s, '#fff8e8', 'center', true, BODY);
+    cachedLabel('换武器', L.swap.x, L.swap.y + L.swap.r + 12 * s, 10 * s, '#fff8e8', 'center', true, BODY);
+    if (G.near || G.catNear) {
+      iconButton(L.use, G.catNear && !G.near ? 'jump' : 'use', '#e0b04b');
+      cachedLabel(G.near ? '拾取' : '上勺', L.use.x, L.use.y + L.use.r * 0.64, 10 * s, '#fff8e8', 'center', true, BODY);
+    }
+    cachedLabel('移动', L.moveHome.x, L.moveHome.y + L.moveHome.r + 13 * s, 10 * s, '#fff4d8', 'center', true, BODY);
+    cachedLabel('按住射击 · 拖动瞄准', L.aimHome.x, L.aimHome.y + L.aimHome.r + 13 * s, 9 * s, '#fff4d8', 'center', true, BODY);
     ctx.restore();
   }
-  // 电脑：鼠标准星（自己瞄准，学《元气骑士》）。颜色跟武器稀有度走，没饭力时变成蓝色的“饿”
+  function drawContext(L) {
+    const G = Game, P = G.p; if (G.state !== 'play' || G.over) return;
+    const s = L.s, buffs = ['clock', 'magnet', 'frenzy'].filter(k => P.buffs[k] > 0);
+    const y = Math.max(bossBarsBottom + 30 * s, L.top + (L.portrait ? 190 : 102) * s);
+    const names = { clock: '子弹时间', magnet: '吸饭磁铁', frenzy: '爆辣火力' };
+    buffs.forEach((key, i) => {
+      const w = Math.min(110 * s, (W - 28) / Math.max(1, buffs.length)), x = W / 2 + (i - (buffs.length - 1) / 2) * (w + 3);
+      ctx.fillStyle = 'rgba(29,29,29,0.8)'; rrect(x - w / 2, y - 11 * s, w, 24 * s, 12 * s); ctx.fill();
+      label(names[key] + ' ' + Math.ceil(P.buffs[key]) + '秒', x, y + 1, 10 * s, SIDES[key].col, 'center', false, BODY);
+    });
+    const wp = G.weapon(), empty = wp?.cost > 0 && P.full < wp.cost * P.s.costMul;
+    let msg = empty ? '饭力不足 · 朝米饭走，挥勺补弹' : G.phase === 'rest' ? (G.catNear ? (touchUI() ? '点「上勺」起飞！' : '按 F 上勺，起飞！') : '本锅通关！走到金色弹射勺') : G.tip?.msg;
+    if (!msg || G.banner && !empty) return;
+    const ty = y + (buffs.length ? 36 : 6) * s, w = Math.min(W - 24, 364 * s);
+    ctx.font = `700 ${12 * s}px ${BODY}`;
+    const lines = Math.max(1, Math.ceil(ctx.measureText(msg).width / (w - 22))), h = (lines * 19 + 14) * s;
+    ctx.fillStyle = empty ? 'rgba(35,68,85,0.94)' : 'rgba(46,29,14,0.9)'; rrect((W - w) / 2, ty - 15 * s, w, h, 12 * s); ctx.fill();
+    wrapLabel(msg, W / 2, ty, 12 * s, w - 22, empty ? '#b9efff' : '#ffe9b3');
+  }
+  function drawWeaponInfo() {
+    const info = Game.weaponInfo, wp = WEAPONS[info.id], L = weaponInfoLayout(W, H), R = RARITY[wp.rar], h = L.h;
+    ctx.fillStyle = 'rgba(19,13,8,0.82)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#392718'; rrect(L.x, L.y, L.w, h, 22); ctx.fill();
+    stroke(2, R.col); ctx.stroke();
+    wIcon(info.id, L.x + 40, L.y + h * 0.115, Math.min(27, h * 0.08));
+    label(wp.name, L.x + 80, L.y + h * 0.1, Math.min(27, (L.w - 100) / wp.name.length, h * 0.08), '#fff2d2', 'left');
+    label(R.name + (wp.duration ? ' · 限时 ' + wp.duration + ' 秒' : ''), L.x + 80, L.y + h * 0.18, Math.min(12, h * 0.04), R.col, 'left', false, BODY);
+    const cost = wp.cost ? `饭力 ${wp.cost} / 发` : '不耗饭力';
+    label(cost + '   ·   ' + (wp.kind === 'charge' ? '按住蓄力 · 松手发射' : wp.chain ? '命中目标连续反弹' : wp.harvest ? '射向米饭补饭力' : '按住持续攻击'), L.x + L.w / 2, L.y + h * 0.26, Math.min(12, (L.w - 30) / 25, h * 0.04), '#ddc9a9', 'center', false, BODY);
+    wrapLabel(wp.desc, L.x + L.w / 2, L.y + h * 0.34, Math.min(13, h * 0.04), L.w - 36, '#ffe7b8');
+    drawWeaponDemo(info.id, { x: L.x + 18, y: L.y + h * 0.45, w: L.w - 36, h: h * 0.32 }, info.t);
+    button(L.done, touchUI() ? '拿好，开饭！' : '拿好，开饭！  F / Enter', '#d68e42', Math.min(17, L.done.w / 16));
+  }
+  function drawWeaponDemo(id, b, time) {
+    const wp = WEAPONS[id], f = time % 2.8 / 2.8;
+    ctx.save(); rrect(b.x, b.y, b.w, b.h, 13); ctx.clip();
+    ctx.fillStyle = '#201b18'; ctx.fillRect(b.x, b.y, b.w, b.h);
+    const x = b.x + b.w * 0.13, y = b.y + b.h * 0.58, tx = b.x + b.w * 0.76;
+    const target = (px, py, hit = false) => {
+      const r = Math.min(14, b.h * 0.18); disc(px, py, r * (hit ? 0.85 : 1), hit ? '#ffd67b' : '#dcecb6');
+      stroke(1.8, '#342111'); ctx.beginPath(); ctx.moveTo(px - 5, py - 2); ctx.lineTo(px - 3, py - 2); ctx.moveTo(px + 3, py - 2); ctx.lineTo(px + 5, py - 2); ctx.stroke();
+      if (hit) { stroke(2, '#fff1b1'); for (let i = 0; i < 5; i++) { const a = i * TAU / 5 + time; ctx.beginPath(); ctx.moveTo(px + Math.cos(a) * (r + 3), py + Math.sin(a) * (r + 3)); ctx.lineTo(px + Math.cos(a) * (r + 9), py + Math.sin(a) * (r + 9)); ctx.stroke(); } }
+    };
+    wIcon(id, x, y, Math.min(24, b.h * 0.25));
+    if (id === 'mochi') {
+      const stuck = f > 0.22 && f < 0.57, ex = stuck ? x + 52 : f < 0.22 ? x + 70 : lerp(x + 52, tx + 15, Math.min(1, (f - 0.57) * 3));
+      target(ex, y - (stuck ? 15 + Math.sin(time * 24) * 5 : 0), f > 0.85); target(tx + 28, y + 3, f > 0.85);
+      if (stuck) { stroke(5, '#ffecde'); ctx.beginPath(); ctx.moveTo(x + 18, y - 4); ctx.quadraticCurveTo(x + 30, y + 7, ex, y - 12); ctx.stroke(); }
+      ctx.restore(); return;
+    }
+    if (id === 'strainer') {
+      target(tx, y, f > 0.85);
+      if (f < 0.6) for (let i = 0; i < 4; i++) { const k = (f * 2 + i * 0.18) % 1; stroke(1, '#ab6340'); blob(lerp(tx - 15, x + 16, k), y + Math.sin(i) * 12, 4, 4, i % 2 ? '#f4be62' : '#e47863'); }
+      else { const k = (f - 0.6) / 0.4; stroke(2, '#d3ad72'); blob(lerp(x + 20, tx, k), y - Math.sin(k * Math.PI) * 9, 11, 11, '#ffedc2'); }
+      ctx.restore(); return;
+    }
+    if (id === 'nori') {
+      const k = f < 0.5 ? f * 2 : (1 - f) * 2, py = y - Math.sin(k * Math.PI) * b.h * 0.25;
+      stroke(2, '#7eaf76'); ctx.setLineDash([3, 4]); ctx.beginPath(); ctx.moveTo(x + 18, y); ctx.quadraticCurveTo((x + tx) / 2, b.y + 4, tx, y); ctx.stroke(); ctx.setLineDash([]);
+      wIcon(id, lerp(x + 25, tx, k), py, 12); target(tx, y, Math.abs(f - 0.5) < 0.1); ctx.restore(); return;
+    }
+    if (id === 'cheese') {
+      const shift = f > 0.6 ? (f - 0.6) * 60 : 0, points = [[b.x + b.w * 0.48 + shift, y], [b.x + b.w * 0.69 + shift, y - 15], [b.x + b.w * 0.83 + shift, y + 12]];
+      stroke(3, '#ffe383'); ctx.beginPath(); points.forEach((p, i) => i ? ctx.lineTo(...p) : ctx.moveTo(...p)); ctx.stroke(); points.forEach(p => target(...p, f > 0.6));
+      for (let i = 0; i < 3; i++) { const k = (f * 3 + i * 0.2) % 1; stroke(1, '#c99827'); blob(lerp(x + 25, points[0][0], k), y, 4, 3, '#ffdd6c'); }
+      ctx.restore(); return;
+    }
+    if (id === 'gyoza') {
+      const gx = b.x + b.w * 0.58, k = clamp((f - 0.58) * 4, 0, 1);
+      target(lerp(tx + 20, gx, Math.min(1, f * 1.7)), y - 12, f > 0.6);
+      ctx.save(); ctx.translate(gx, y + 6 - Math.sin(k * Math.PI) * 28); ctx.rotate(k * Math.PI); wIcon(id, 0, 0, 13); ctx.restore();
+      if (f > 0.72) { stroke(3, '#ffd079'); ctx.beginPath(); ctx.ellipse(gx, y + 9, (f - 0.72) * b.w * 0.7 + 5, 9, 0, 0, TAU); ctx.stroke(); }
+      ctx.restore(); return;
+    }
+    if (id === 'soda') {
+      target(tx, y, f > 0.75); const k = Math.min(1, f * 2);
+      if (f < 0.55) { stroke(2, '#aff1ff'); blob(lerp(x + 25, tx, k), y, 6, 3, '#86d7f4'); }
+      else { stroke(3, '#a1e7ff'); ctx.beginPath(); ctx.arc(tx, y, 20, 0, TAU); ctx.stroke(); if (f > 0.75) for (let i = 0; i < 6; i++) { const a = i * TAU / 6; ctx.beginPath(); ctx.moveTo(tx, y); ctx.lineTo(tx + Math.cos(a) * 29, y + Math.sin(a) * 29); ctx.stroke(); } }
+      ctx.restore(); return;
+    }
+    if (id === 'ricochet') {
+      const path = [[x + 25, y], [b.x + b.w * 0.43, b.y + b.h * 0.34], [b.x + b.w * 0.78, b.y + b.h * 0.28], [b.x + b.w * 0.64, b.y + b.h * 0.76], [b.x + b.w * 0.91, b.y + b.h * 0.68]];
+      const t = Math.min(3.999, f * 4.8), k = Math.floor(t), a = path[k], z = path[k + 1];
+      stroke(2, '#53717b'); ctx.setLineDash([4, 5]); ctx.beginPath(); path.forEach((p, i) => i ? ctx.lineTo(...p) : ctx.moveTo(...p)); ctx.stroke(); ctx.setLineDash([]);
+      path.slice(1).forEach((p, i) => target(...p, Math.abs(t - i - 1) < 0.22));
+      wIcon('ricochet', lerp(a[0], z[0], t - k), lerp(a[1], z[1], t - k), 10); ctx.restore(); return;
+    }
+    if (id === 'vacuum') {
+      for (let i = 0; i < 8; i++) { stroke(1, '#cfb990'); blob(tx - 12 + i % 3 * 10, y - 6 + Math.floor(i / 3) * 7, 7, 4, '#fff0cb', i); }
+      const outbound = f < 0.5, k = outbound ? f * 2 : (1 - f) * 2, px = lerp(x + 25, tx, k);
+      if (outbound) { stroke(2, '#9cf2ff'); ctx.beginPath(); ctx.arc(px, y - 3, 7, 0, TAU); ctx.stroke(); }
+      else for (let i = 0; i < 4; i++) { stroke(1, '#cfb990'); blob(px + i * 4, y - Math.sin(k * Math.PI) * 22 - i * 3, 5, 3, '#fff4cf', i); }
+      bar(x - 12, b.y + b.h - 12, 53, 5, 0.25 + f * 0.7, '#b5f1ff', '#61b6de'); ctx.restore(); return;
+    }
+    target(tx, y, f > 0.68 && f < 0.85);
+    const start = x + 27, end = tx - 16, k = Math.min(1, f / 0.72), px = lerp(start, end, k);
+    if (wp.kind === 'charge') {
+      if (f < 0.65) { stroke(3, '#a5f98b'); ctx.beginPath(); ctx.arc(start, y, 7 + f * 15, 0, TAU * f / 0.65); ctx.stroke(); }
+      else if (f < 0.84) { stroke(12 * (1 - (f - 0.65) / 0.2), '#b5ff8a'); ctx.beginPath(); ctx.moveTo(start, y); ctx.lineTo(b.x + b.w, y); ctx.stroke(); }
+    } else if (wp.kind === 'lob') {
+      wIcon('onigiri', px, y - Math.sin(k * Math.PI) * b.h * 0.5, 9);
+      if (f > 0.72 && f < 0.9) { stroke(4, '#ffd98a'); ctx.beginPath(); ctx.arc(tx, y, 8 + (f - 0.72) * 180, 0, TAU); ctx.stroke(); }
+    } else if (wp.kind === 'melee' || wp.kind === 'vortex' || wp.kind === 'cone') {
+      const a = Math.sin(f * TAU) * 0.8;
+      stroke(wp.kind === 'cone' ? 18 : 6, wp.kind === 'cone' ? '#eaf8ff' : '#ffe6a3'); ctx.beginPath(); ctx.arc(x + 25, y, b.w * 0.42, -0.52 + a, 0.52 + a); ctx.stroke();
+      if (wp.kind === 'vortex') for (let i = 0; i < 3; i++) { stroke(2, '#cce9ff'); ctx.beginPath(); ctx.arc(lerp(start, tx, 0.55), y, 11 + i * 8, time * 4 + i, time * 4 + i + 3); ctx.stroke(); }
+    } else if (id === 'popcorn' && f > 0.48) {
+      for (let i = 0; i < 8; i++) { const a = i * TAU / 8, d = (f - 0.48) * b.w * 0.5; stroke(1, '#f6c96d'); blob(lerp(start, tx, 0.66) + Math.cos(a) * d, y + Math.sin(a) * d, 4, 3, '#fff1bf'); }
+    } else if (id === 'cleaver') {
+      const y2 = y - Math.sin(k * Math.PI * 2) * b.h * 0.32; wIcon(id, px, y2, 12);
+      stroke(1.5, '#beeaff'); ctx.beginPath(); ctx.moveTo(start, y); ctx.lineTo(lerp(start, end, 0.5), y - b.h * 0.32); ctx.lineTo(end, y); ctx.stroke();
+    } else if (id === 'rollpin') wIcon(id, px, y, 17);
+    else {
+      for (let i = 0; i < (wp.n || (id === 'chili' ? 5 : 3)); i++) {
+        const travel = (f * (wp.n ? 1.2 : 2.4) + (wp.n ? 0 : i * 0.15)) % 1, bx = lerp(start, end, travel), by = y + (wp.n ? (i - 2.5) * travel * 9 : id === 'chili' ? Math.sin(i) * 12 * travel : 0);
+        stroke(1, id === 'soy' ? '#b77c41' : '#f6cd87'); blob(bx, by, id === 'chili' ? 10 : 5, id === 'soy' ? 4 : 3, id === 'soy' ? '#864f27' : id === 'chili' ? '#ff914d' : '#fff3d6');
+      }
+    }
+    ctx.restore();
+  }
+  // 电脑鼠标准星。
   function drawCrosshair() {
     const G = Game, P = G.p, m = Input.mouse; if (!m.moved) return;
     const Wp = G.weapon(), cost = Wp ? Wp.cost * P.s.costMul : 0, low = cost > 0 && P.full < cost;
@@ -5732,8 +6733,8 @@ const HUD = (() => {
     else if (!o.win) note = `倒在了第 ${o.pot + 1} 锅 · ${POTS[o.pot].name}`;
     if (note) label(note, W / 2, H * 0.2 + 42 * s, 16 * s, o.win ? '#9effc0' : '#ffe0d0', 'center', true, BODY);
     // 三只碗：吃完了几锅
-    for (let i = 0; i < 3; i++) {
-      const x = W / 2 + (i - 1) * 56 * s, y = H * 0.36, r = 20 * s, done = i < G.stats.pots;
+    for (let i = 0; i < POTS.length; i++) {
+      const gap = Math.min(48 * s, (W - 54) / POTS.length), x = W / 2 + (i - (POTS.length - 1) / 2) * gap, y = H * 0.36, r = Math.min(18 * s, gap * 0.38), done = i < G.stats.pots;
       ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(x, y, r + 3, 0, Math.PI); ctx.closePath(); ctx.fill();
       ctx.fillStyle = done ? POTS[i].look.accent : '#6a5a4a'; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI); ctx.closePath(); ctx.fill();
       if (done) { ctx.fillStyle = POTS[i].look.rice; ctx.beginPath(); ctx.ellipse(x, y - 1, r, r * 0.55, 0, Math.PI, TAU); ctx.fill(); }
@@ -5771,7 +6772,7 @@ const HUD = (() => {
     if (G.checkpoint) { const buttons = titleButtons(W, H); button(buttons.resume, '继续', '#d99447', 21 * s); button(buttons.start, '开饭', '#8b735b', 19 * s); }
     else label('开饭', W / 2, H * 0.84, 26 * s, `rgba(255,255,255,${0.7 + Math.sin(G.real * 5) * 0.3})`, 'center');
 
-    cachedLabel('试玩版 v0.9 · 3D', W - 10, H - 12, 11, 'rgba(255,255,255,0.7)', 'right', false, BODY);
+    cachedLabel('试玩版 v0.10 · 3D', W - 10, H - 12, 11, 'rgba(255,255,255,0.7)', 'right', false, BODY);
   }
   // 选火候：三张卡，一张卡 = 一整顿饭（三口锅）
   function drawSelect() {
@@ -5881,6 +6882,7 @@ const Platform = (() => {
     try { ui.setPointerCapture(e.pointerId); } catch (_) {}
     if (e.pointerType === 'touch' || e.pointerType === 'pen') Input.touchMode = true;
     Sfx.init(); const p = pos(e);
+    if ((Input.coarse || e.pointerType === 'touch' || e.pointerType === 'pen') && !(Game.state === 'pause' && inside(p, pauseLayout(width, height).screen))) P.enterFullscreen();
     if (Game.state === 'pause') {
       const L = pauseLayout(width, height), key = ['music', 'sfx'].find(k => inside(p, L[k]));
       if (key) { audioDrag = { key, id: e.pointerId }; audioMove(p); wake(); return; }
@@ -5897,7 +6899,7 @@ const Platform = (() => {
   ui.addEventListener('contextmenu', e => e.preventDefault());
   window.addEventListener('keydown', e => {
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code)) e.preventDefault();
-    Sfx.init(); Input.keyDown(e.code); wake();
+    Sfx.init(); if (Input.coarse) P.enterFullscreen(); Input.keyDown(e.code); wake();
   });
   window.addEventListener('keyup', e => { Input.keyUp(e.code); wake(); });
   ui.addEventListener('wheel', e => {
@@ -5905,6 +6907,9 @@ const Platform = (() => {
   }, { passive: false });
   window.addEventListener('blur', () => { if (audioDrag) { audioDrag = null; Settings.save(); } Input.blur(); Game.pauseNow(); wake(); });
   window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => { Input.blur(); resize(); });
+  document.addEventListener('fullscreenchange', () => { Input.blur(); resize(); });
+  document.addEventListener('webkitfullscreenchange', () => { Input.blur(); resize(); });
   window.visualViewport?.addEventListener('resize', resize);
   document.addEventListener('visibilitychange', () => {
     if (audioDrag) { audioDrag = null; Settings.save(); }
@@ -5935,18 +6940,29 @@ const Platform = (() => {
       while (acc >= STEP && n++ < 8) { step(); acc -= STEP; }
       if (n >= 8) acc = 0;
     } else { acc = 0; step(); }
-    if (active() || worldDirty) { R3.draw(dt); P.rendered++; worldDirty = false; }
+    // Weapon demonstrations animate only the HUD while the world stays frozen.
+    if (active() && Game.state !== 'weapon' || worldDirty) { R3.draw(dt); P.rendered++; worldDirty = false; }
     HUD.draw();
     const cur = Game.state === 'play' && !Input.touchMode && P.bot === null ? 'none' : 'default';
     if (ui.style.cursor !== cur) ui.style.cursor = cur;
     if (active()) raf = requestAnimationFrame(frame);
   }
-  P.fullscreen = async () => {
+  P.enterFullscreen = async () => {
+    if (document.fullscreenElement || document.webkitFullscreenElement || P.fullscreenPending) return;
     try {
       const stage = document.getElementById('stage');
-      if (document.fullscreenElement || document.webkitFullscreenElement) await (document.exitFullscreen?.() || document.webkitExitFullscreen?.());
-      else if (stage.requestFullscreen) await stage.requestFullscreen();
-      else stage.webkitRequestFullscreen?.();
+      if (!stage.requestFullscreen && !stage.webkitRequestFullscreen) return;
+      P.fullscreenPending = true;
+      if (stage.requestFullscreen) await stage.requestFullscreen({ navigationUI: 'hide' });
+      else await stage.webkitRequestFullscreen();
+    } catch (_) { /* Unsupported or denied browsers keep the viewport-sized stage. */ }
+    finally { P.fullscreenPending = false; }
+  };
+  P.fullscreen = async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else if (document.webkitFullscreenElement) await document.webkitExitFullscreen?.();
+      else await P.enterFullscreen();
     } catch (_) {}
   };
   P.wake = wake;

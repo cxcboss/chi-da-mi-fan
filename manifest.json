@@ -1,7 +1,15 @@
 {
   "index.html": {
-    "bytes": 401559,
-    "sha256": "6659991f3ca65c249feeac1397fd05732c077c198927c69da198517f80f696fa"
+    "bytes": 478001,
+    "sha256": "290435c561510c9ef587e3803bdb171aadfef1d217c9eecd8fa4ca7f82350bbf"
+  },
+  "game.webmanifest": {
+    "bytes": 357,
+    "sha256": "fb95657019efa46c188e6d624536a583ccac01f0537ca74911e7dbac4832bbd6"
+  },
+  "assets/icon.svg": {
+    "bytes": 861,
+    "sha256": "8e25c1e42fd6676a92793a7e3d58d0647f1cd0fc5ae7819170728857b6b2ff66"
   },
   "vendor/three.module.js": {
     "bytes": 1272972,

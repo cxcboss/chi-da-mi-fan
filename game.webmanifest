@@ -1,0 +1,13 @@
+{
+  "id": "./",
+  "name": "吃大米饭",
+  "short_name": "吃大米饭",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#2a1c12",
+  "theme_color": "#2a1c12",
+  "icons": [{ "src": "./assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
