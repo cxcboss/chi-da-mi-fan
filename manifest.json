@@ -1,0 +1,38 @@
+{
+  "index.html": {
+    "bytes": 401559,
+    "sha256": "6659991f3ca65c249feeac1397fd05732c077c198927c69da198517f80f696fa"
+  },
+  "vendor/three.module.js": {
+    "bytes": 1272972,
+    "sha256": "76dea8151bc9352aef3528b4262e249b2604f62543828328db978d060d61a495"
+  },
+  "vendor/LICENSE": {
+    "bytes": 1081,
+    "sha256": "852e0e8699169bf9f6fdc6bda3e682d078dcbc738b5d33e74df594721bff271d"
+  },
+  "vendor/addons/environments/RoomEnvironment.js": {
+    "bytes": 3735,
+    "sha256": "e21f41b7ef2016f2984a5d27850b42dffa797a6a194a138e288b06576d765a7b"
+  },
+  "vendor/addons/geometries/RoundedBoxGeometry.js": {
+    "bytes": 4625,
+    "sha256": "d20aeaf7077c459a8d952d215738d7b44fba028440bb862d84b622a34f0c80bb"
+  },
+  "assets/audio/background-v1.m4a": {
+    "bytes": 3174834,
+    "sha256": "e429a3aa32154d0141037347d7a3a8a29194f4ee77222cf45f1029c9d33b7b1e"
+  },
+  "assets/audio/boss-v1.m4a": {
+    "bytes": 4439732,
+    "sha256": "960fb665cb5f85faf8015461dea4f878c6b2fa5e2346fcc0be4f97a8bd33fae2"
+  },
+  ".nojekyll": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "_headers": {
+    "bytes": 311,
+    "sha256": "dec35d580f441984aad283c8ed77d2e372783a63e2701644626c4346b5ea7009"
+  }
+}
