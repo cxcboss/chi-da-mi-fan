@@ -3,6 +3,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#2a1c12">
+<meta name="application-version" content="0.11.0">
 <link rel="manifest" href="./game.webmanifest">
 <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -16,12 +17,13 @@
   #stage:-webkit-full-screen{width:100vw;height:100vh;background:#2a1c12}
   #gl,#ui{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
   #gl{pointer-events:none}#ui{outline:none}
+  #version{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 6px);transform:translateX(-50%);z-index:2;padding:3px 10px;border:1px solid rgba(255,233,192,.22);border-radius:20px;background:rgba(30,18,10,.8);color:#ffedca;font:600 11px/1.3 -apple-system,BlinkMacSystemFont,sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap;pointer-events:none}
   #boot{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:0 16px;color:#ffe9c0;font:600 18px "PingFang SC","Microsoft YaHei",sans-serif;text-align:center;background:#2a1c12}
 </style>
 <script type="importmap">
 {"imports":{"three":"./vendor/three.module.js","three/addons/":"./vendor/addons/"}}
 </script>
-<div id="stage"><canvas id="gl"></canvas><canvas id="ui" tabindex="0" aria-label="吃大米饭"></canvas><div id="boot">开饭…</div></div>
+<div id="stage"><canvas id="gl"></canvas><canvas id="ui" tabindex="0" aria-label="吃大米饭"></canvas><div id="boot">开饭…</div><div id="version" data-build="74a92faa" aria-label="版本 0.11.0">v0.11.0</div></div>
 <script type="module">
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
@@ -255,21 +257,28 @@ function titleButtons(W, H) {
   return { resume: { x: (W - w) / 2, y: y - h - gap, w, h }, start: { x: (W - w) / 2, y, w, h } };
 }
 
-// 选锅界面：3 档火候，每档一张大卡片
+// 所有关卡共用一张自适应网格，输入和绘制使用相同的矩形。
 function levelLayout(W, H) {
   const portrait = H > W * 1.1, buttons = [], safe = Settings.safe;
-  const vw = W - safe.left - safe.right, vh = H - safe.top - safe.bottom;
-  const gap = portrait ? 14 : 20, header = Math.min(portrait ? 150 : 100, vh * 0.27), foot = Math.min(20, vh * 0.04);
-  if (portrait) {
-    const w = Math.min(vw - 32, 420), h = Math.min(clamp((vh - 260) / 3 - 14, 110, 170), (vh - header - foot - gap * 2) / 3);
-    const x = safe.left + (vw - w) / 2, y0 = safe.top + header + Math.max(0, (vh - header - foot - h * 3 - gap * 2) / 2);
-    for (let i = 0; i < 3; i++) buttons.push({ x, y: y0 + i * (h + gap), w, h, idx: i });
-  } else {
-    const w = Math.min(260, (vw - 32 - gap * 2) / 3), h = Math.min(clamp(vh - 300, 220, 320), vh - header - foot);
-    const x0 = safe.left + (vw - w * 3 - gap * 2) / 2, y = safe.top + header + Math.max(0, (vh - header - foot - h) / 2);
-    for (let i = 0; i < 3; i++) buttons.push({ x: x0 + i * (w + gap), y, w, h, idx: i });
+  const vw = Math.max(1, W - safe.left - safe.right), vh = Math.max(1, H - safe.top - safe.bottom);
+  const s = clamp(Math.min(vw, vh) / 420, 0.75, 1.15);
+  const pad = Math.min(24, vw * 0.04), w = Math.min(1120, vw - pad * 2);
+  const x = safe.left + (vw - w) / 2, top = safe.top + Math.min(18 * s, vh * 0.03);
+  const header = Math.min(48 * s, vh * 0.14), gap = Math.min(14 * s, vh * 0.025);
+  const heatH = Math.min(38 * s, vh * 0.12), heatY = top + header + gap;
+  const heatW = Math.min(128 * s, (w - gap * 2) / 3), heats = [];
+  for (let i = 0; i < HEATS.length; i++) heats.push({ x: x + i * (heatW + gap), y: heatY, w: heatW, h: heatH, idx: i });
+  const cols = portrait ? 2 : vw >= 470 ? 4 : 3, rows = Math.ceil(POTS.length / cols);
+  const gridY = heatY + heatH + gap * 1.5, foot = Math.min(32, vh * 0.1);
+  const gridH = Math.min(540, Math.max(1, safe.top + vh - foot - gridY));
+  const cw = (w - gap * (cols - 1)) / cols, ch = (gridH - gap * (rows - 1)) / rows;
+  for (let i = 0; i < POTS.length; i++) {
+    const col = i % cols, last = i === POTS.length - 1;
+    const span = last ? cols - col : 1;
+    buttons.push({ x: x + col * (cw + gap), y: gridY + Math.floor(i / cols) * (ch + gap), w: cw * span + gap * (span - 1), h: ch, idx: i });
   }
-  return { buttons, portrait };
+  const resume = { x: x + w - Math.min(116 * s, w * 0.38), y: top + 2, w: Math.min(116 * s, w * 0.38), h: header - 4 };
+  return { buttons, heats, resume, portrait, s, x, top, w, header };
 }
 
 // Compact arrays in place; callers can return expired objects to a pool.
@@ -728,7 +737,7 @@ const Input = (() => {
         if (code === 'KeyE') e.ult = true;
         if (code === 'KeyQ' || code === 'Tab') e.swap = true;
         if (code === 'KeyF') e.use = true;
-        if (/^Digit[1-3]$/.test(code)) e.pick = +code.slice(5);
+        if (/^Digit[1-7]$/.test(code)) e.pick = +code.slice(5);
         if (code === 'KeyP' || code === 'Escape') e.pause = true;
         if (code === 'KeyM') e.mute = true;
         if (code === 'KeyV') e.auto = true;
@@ -827,7 +836,7 @@ const Input = (() => {
 // ---------------- 游戏逻辑（不碰 DOM / Canvas / WebGL，可在 Node 里直接跑模拟测试） ----------------
 // 七锅连续闯关：开饭 → 中场精英 → BOSS → 饭后选武器 → 弹射到下一锅。
 const Game = (() => {
-  const G = { state: 'title', t: 0, real: 0, heat: 0, pot: 0, L: makeLevel(0, 0), sel: 0, dirty: [], phase: 'fight' };
+  const G = { state: 'select', t: 0, real: 0, heat: 0, pot: 0, startPot: 0, L: makeLevel(0, 0), sel: 0, selPot: 0, dirty: [], phase: 'fight' };
   const enemyGrid = makeSpatialGrid(), bulletPool = [], enemyBulletPool = [], partPool = [], impactPool = [];
   const BUFF_KEYS = ['clock', 'magnet', 'frenzy'], ENEMY_TIMERS = ['cheeseT', 'capFlipT', 'iceCrackT', 'traceT', 'tetherT'];
   const FOOD_ENEMIES = new Set(['garlic', 'mushroom', 'shrimp', 'carrier', 'youtiao']);
@@ -848,6 +857,7 @@ const Game = (() => {
       const save = JSON.parse(G.store.get('run8') || 'null');
       G.checkpoint = save?.version === 1 && Number.isInteger(save.heat) && save.heat >= 0 && save.heat < HEATS.length && Number.isInteger(save.pot) && save.pot >= 0 && save.pot < POTS.length && save.player && typeof save.player === 'object' ? save : null;
     } catch (_) { G.checkpoint = null; }
+    G.selPot = G.checkpoint?.pot || 0;
     G.sel = 0; for (let i = 0; i < 3; i++) if (heatUnlocked(i, G.cleared) && !G.cleared.has(i)) { G.sel = i; break; }
   };
   G.isUnlocked = i => heatUnlocked(i, G.cleared);
@@ -856,14 +866,15 @@ const Game = (() => {
   function saveCheckpoint() {
     if (G.state !== 'play' || G.restoring || G.previewing || G.over) return;
     const P = G.p;
-    G.checkpoint = { version: 1, heat: G.heat, pot: G.pot, runT: G.runT, stats: { ...G.stats, bossT: [...G.stats.bossT] }, player: { hp: P.hp, maxHp: P.maxHp, full: P.full, shield: P.shield, revived: P.revived, wi: P.wi, weps: P.weps.map(w => w ? w.id : null), temporary: P.weps.map(w => w?.remaining > 0 ? { remaining: w.remaining, restore: w.restore || null } : null), sides: { ...P.sides }, s: { ...P.s } } };
+    G.checkpoint = { version: 1, heat: G.heat, pot: G.pot, startPot: G.startPot, runT: G.runT, stats: { ...G.stats, bossT: [...G.stats.bossT] }, player: { hp: P.hp, maxHp: P.maxHp, full: P.full, shield: P.shield, revived: P.revived, wi: P.wi, weps: P.weps.map(w => w ? w.id : null), temporary: P.weps.map(w => w?.remaining > 0 ? { remaining: w.remaining, restore: w.restore || null } : null), sides: { ...P.sides }, s: { ...P.s } } };
     G.store.set('run8', JSON.stringify(G.checkpoint));
   }
   G.resumeRun = function () {
     const save = G.checkpoint; if (!save) return false;
     G.restoring = true;
     try {
-      newRun(save.heat); if (save.pot) loadPot(save.pot);
+      newRun(save.heat, Number.isInteger(save.startPot) && save.startPot >= 0 && save.startPot <= save.pot ? save.startPot : 0);
+      if (save.pot !== G.pot) loadPot(save.pot);
       const P = G.p, p = save.player;
       P.maxHp = Number.isFinite(p.maxHp) ? clamp(p.maxHp, CFG.P_HP, 2000) : CFG.P_HP;
       P.hp = Number.isFinite(p.hp) ? clamp(p.hp, 1, P.maxHp) : P.maxHp;
@@ -1049,14 +1060,14 @@ const Game = (() => {
       s: { dmg: 1, rate: 1, spd: 1, crit: 0.08, fullGain: 1, costMul: 1, ultCd: 10, ultPow: 1, ultThresh: 60 },
     };
   }
-  function newRun(heat) {
+  function newRun(heat, pot = 0) {
     G.previewWorld = false;
-    G.heat = heat; G.p = newPlayer(); G.runT = 0; G.over = null; G.overT = 0;
+    G.heat = heat; G.startPot = pot; G.selPot = pot; G.p = newPlayer(); G.runT = 0; G.over = null; G.overT = 0;
     G.stats = { kills: 0, rice: 0, dmgTaken: 0, ults: 0, pots: 0, weapons: 1, bossT: [] };
     G.trauma = 0; G.hitstop = 0; G.slowmo = 1; G.hurtFlash = 0; G.flashWhite = 0; G.fade = 0;
     G.state = 'play';
     G.tipTimes = {}; G.tip = null; G.weaponInfo = null;
-    loadPot(0);
+    loadPot(pot);
     Sfx.setPaused(false);
   }
   G.newRun = newRun;
@@ -1077,7 +1088,7 @@ const Game = (() => {
       G.zones.push({ kind: 'wind', x: Math.cos(a) * 480, y: Math.sin(a) * 480, r: 155, t: 0, dur: 1e9, seed: i });
     }
     const P = G.p; P.x = 0; P.y = 0; P.vx = P.vy = 0;
-    if (pot === 0 && !G.previewing) {
+    if (pot === G.startPot && !G.previewing && G.stats.pots === 0) {
       dropWeapon(-100, 30, 'mochi', 'starter', true);
       dropWeapon(100, 30, 'strainer', 'starter', true);
     }
@@ -1085,13 +1096,13 @@ const Game = (() => {
     Sfx.setBoss(false); Sfx.setPot(pot);
     saveCheckpoint();
   }
-  // 标题画面：一锅饭 + 主角 + 几个围观的食物
+  // 选关背景：一锅饭 + 主角 + 几个围观的食物。
   G.preview = function () {
     G.previewWorld = true;
     G.heat = 0; G.p = newPlayer(); G.stats = { kills: 0, rice: 0, dmgTaken: 0, ults: 0, pots: 0, weapons: 1, bossT: [] };
     G.trauma = 0; G.hitstop = 0; G.slowmo = 1; G.hurtFlash = 0; G.flashWhite = 0; G.fade = 0; G.runT = 0; G.over = null;
     G.previewing = true; loadPot(0); G.previewing = false;
-    G.state = 'title'; G.banner = null;
+    G.state = 'select'; G.selT = 0; G.banner = null;
     [[-150, -60, 'oni'], [140, -90, 'pea'], [60, 130, 'radish'], [-110, 120, 'egg']].forEach(([x, y, k]) => { const e = spawnEnemy(k, x, y); e.z = 0; e.state = 'idle'; });
     G.p.aimA = Math.PI / 2;
   };
@@ -2955,12 +2966,14 @@ const Game = (() => {
 
   function endRun(win, reason) {
     if (G.over) return;
-    G.over = { win, t: G.runT, pot: G.pot, heat: G.heat, reason: reason || (win ? 'boss' : 'hp') };
+    G.over = { win, t: G.runT, pot: G.pot, heat: G.heat, fullRun: G.startPot === 0, reason: reason || (win ? 'boss' : 'hp') };
     G.overT = 0;
     G.checkpoint = null; G.store.set('run8', '');
     G.runs++; G.store.set('runs', G.runs);
     if (win) {
-      Sfx.win(); banner('一顿吃完！', `${POTS.length} 口锅全部吃光了`, 3);
+      Sfx.win(); banner(G.over.fullRun ? '一顿吃完！' : '闯关完成！', '', 3);
+      // 从后面的锅开始仍可连续闯关，整轮纪录和火候解锁只统计完整七锅。
+      if (!G.over.fullRun) return;
       const before = [0, 1, 2].filter(i => heatUnlocked(i, G.cleared)).length;
       G.cleared.add(G.heat);
       G.over.newUnlock = [0, 1, 2].filter(i => heatUnlocked(i, G.cleared)).length > before;
@@ -2995,13 +3008,20 @@ const Game = (() => {
     }
     if (G.state === 'select') {
       G.selT = (G.selT || 0) + dt;
+      const L = levelLayout(ui.W, ui.H);
       let idx = cmd.pick ? cmd.pick - 1 : -1;
-      if (G.selT > 0.25) for (const tp of cmd.taps) for (const b of levelLayout(ui.W, ui.H).buttons) if (hit(tp, b)) idx = b.idx;
-      if (cmd.start && idx < 0) idx = G.sel;
-      if (cmd.back) { G.state = 'title'; return; }
-      if (idx >= 0 && idx < 3) {
-        if (G.isUnlocked(idx)) { Sfx.select(); newRun(idx); }
-        else { G.lockShake = 0.4; G.lockIdx = idx; Sfx.warn(); }
+      if (cmd.start && idx < 0 && G.checkpoint) { Sfx.init(); Sfx.startMusic(); Sfx.select(); G.resumeRun(); return; }
+      for (const tp of cmd.taps) {
+        if (G.checkpoint && hit(tp, L.resume)) { Sfx.init(); Sfx.startMusic(); Sfx.select(); G.resumeRun(); return; }
+        for (const b of L.heats) if (hit(tp, b)) {
+          if (G.isUnlocked(b.idx)) { G.sel = b.idx; Sfx.select(); }
+          else { G.lockShake = 0.4; G.lockIdx = b.idx; Sfx.warn(); }
+        }
+        for (const b of L.buttons) if (hit(tp, b)) idx = b.idx;
+      }
+      if (cmd.start && idx < 0) idx = G.selPot;
+      if (idx >= 0 && idx < POTS.length && G.isUnlocked(G.sel)) {
+        Sfx.init(); Sfx.startMusic(); Sfx.select(); newRun(G.sel, idx);
       }
       if (G.lockShake > 0) G.lockShake -= dt;
       return;
@@ -6528,7 +6548,7 @@ const HUD = (() => {
       cachedLabel(G.near ? '拾取' : '上勺', L.use.x, L.use.y + L.use.r * 0.64, 10 * s, '#fff8e8', 'center', true, BODY);
     }
     cachedLabel('移动', L.moveHome.x, L.moveHome.y + L.moveHome.r + 13 * s, 10 * s, '#fff4d8', 'center', true, BODY);
-    cachedLabel('按住射击 · 拖动瞄准', L.aimHome.x, L.aimHome.y + L.aimHome.r + 13 * s, 9 * s, '#fff4d8', 'center', true, BODY);
+    cachedLabel('射击 · 瞄准', L.aimHome.x, L.aimHome.y + L.aimHome.r + 13 * s, 9 * s, '#fff4d8', 'center', true, BODY);
     ctx.restore();
   }
   function drawContext(L) {
@@ -6724,7 +6744,7 @@ const HUD = (() => {
     const G = Game, s = hudLayout(W, H).s, o = G.over, k = clamp(G.overT / 0.4, 0, 1);
     ctx.fillStyle = `rgba(30,14,4,${0.7 * k})`; ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = k;
-    const title = o.win ? '饱餐一顿！' : o.reason === 'cold' ? '饭凉了…' : '被食物怪吃掉了…';
+    const title = o.win ? o.fullRun ? '饱餐一顿！' : '闯关完成！' : o.reason === 'cold' ? '饭凉了…' : '被食物怪吃掉了…';
     label(title, W / 2, H * 0.2, Math.min(46 * s, W / 8), o.win ? '#ffe27a' : '#ffb0a0', 'center');
     let note = null;
     if (o.win && o.newUnlock) note = '解锁了更旺的火候！';
@@ -6732,9 +6752,9 @@ const HUD = (() => {
     else if (!o.win && o.reason === 'cold') note = '超时';
     else if (!o.win) note = `倒在了第 ${o.pot + 1} 锅 · ${POTS[o.pot].name}`;
     if (note) label(note, W / 2, H * 0.2 + 42 * s, 16 * s, o.win ? '#9effc0' : '#ffe0d0', 'center', true, BODY);
-    // 三只碗：吃完了几锅
+    // 每只碗对应实际关卡，从中途开局只点亮本轮吃完的锅
     for (let i = 0; i < POTS.length; i++) {
-      const gap = Math.min(48 * s, (W - 54) / POTS.length), x = W / 2 + (i - (POTS.length - 1) / 2) * gap, y = H * 0.36, r = Math.min(18 * s, gap * 0.38), done = i < G.stats.pots;
+      const gap = Math.min(48 * s, (W - 54) / POTS.length), x = W / 2 + (i - (POTS.length - 1) / 2) * gap, y = H * 0.36, r = Math.min(18 * s, gap * 0.38), done = i >= G.startPot && i < G.startPot + G.stats.pots;
       ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(x, y, r + 3, 0, Math.PI); ctx.closePath(); ctx.fill();
       ctx.fillStyle = done ? POTS[i].look.accent : '#6a5a4a'; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI); ctx.closePath(); ctx.fill();
       if (done) { ctx.fillStyle = POTS[i].look.rice; ctx.beginPath(); ctx.ellipse(x, y - 1, r, r * 0.55, 0, Math.PI, TAU); ctx.fill(); }
@@ -6772,46 +6792,68 @@ const HUD = (() => {
     if (G.checkpoint) { const buttons = titleButtons(W, H); button(buttons.resume, '继续', '#d99447', 21 * s); button(buttons.start, '开饭', '#8b735b', 19 * s); }
     else label('开饭', W / 2, H * 0.84, 26 * s, `rgba(255,255,255,${0.7 + Math.sin(G.real * 5) * 0.3})`, 'center');
 
-    cachedLabel('试玩版 v0.10 · 3D', W - 10, H - 12, 11, 'rgba(255,255,255,0.7)', 'right', false, BODY);
   }
-  // 选火候：三张卡，一张卡 = 一整顿饭（三口锅）
+  function paintLevelCard(b) {
+    const pot = POTS[b.idx], look = pot.look;
+    ctx.save(); ctx.translate(b.x, b.y); card(b, look.accent, false);
+    ctx.restore();
+    const horizontal = b.w / b.h > 1.9, r = Math.min(horizontal ? b.h * 0.25 : b.h * 0.22, b.w * 0.21, 52);
+    const cx = b.x + (horizontal ? r + 12 : b.w / 2), cy = b.y + (horizontal ? b.h * 0.53 : b.h * 0.31);
+    cachedRegion(`level-icon:${pot.id}`, cx - r * 1.5 - 3, cy - r * 1.2 - 3, r * 3 + 6, r * 2.3 + 6, () => paintLevelIcon(pot, cx, cy, r));
+    const tx = horizontal ? cx + r + 10 : b.x + b.w / 2, align = horizontal ? 'left' : 'center';
+    const tw = horizontal ? b.x + b.w - tx - 12 : b.w - 22;
+    const size = Math.min(23, b.h * 0.22, tw / (pot.name.length * 1.05));
+    cachedLabel(pot.name, tx, b.y + b.h * (horizontal ? 0.38 : 0.66), size, '#4a2a10', align, false);
+    cachedLabel(pot.bossName, tx, b.y + b.h * (horizontal ? 0.72 : 0.86), Math.min(12, b.h * 0.15, tw / pot.bossName.length), '#886643', align, false, BODY);
+    cachedLabel(String(b.idx + 1).padStart(2, '0'), b.x + b.w - 11, b.y + 12, Math.min(12, b.h * 0.16), '#9d7d56', 'right', false, BODY);
+  }
+  function paintLevelIcon(pot, cx, cy, r) {
+    const look = pot.look;
+    ctx.save(); ctx.translate(cx, cy);
+    stroke(Math.max(1.5, r * 0.065));
+    ctx.fillStyle = look.pot;
+    rrect(-r * 1.32, -r * 0.08, r * 2.64, r * 0.24, r * 0.08); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(0, r * 0.13, r, r * 0.58, 0, 0, Math.PI); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = look.rice;
+    ctx.beginPath(); ctx.ellipse(0, -r * 0.06, r * 0.98, r * 0.47, 0, 0, TAU); ctx.fill(); ctx.stroke();
+    for (let k = 0; k < 18; k++) {
+      const a = k * 2.4, d = Math.sqrt((k + 0.5) / 18) * r * 0.82;
+      ctx.beginPath(); ctx.ellipse(Math.cos(a) * d, -r * 0.09 + Math.sin(a) * d * 0.39, r * 0.1, r * 0.045, a, 0, TAU);
+      ctx.fillStyle = k % 4 === 0 && look.bits ? look.bits[k % look.bits.length] : k % 3 === 0 ? look.riceLo : look.riceHi; ctx.fill();
+    }
+    if (pot.id === 'machine') {
+      ctx.fillStyle = '#d4e4e7'; rrect(-r * 0.14, -r * 0.89, r * 0.28, r * 0.51, r * 0.08); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#ff795b'; ctx.beginPath(); ctx.arc(0, -r * 0.65, r * 0.065, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+  }
   function drawSelect() {
-    const G = Game, s = hudLayout(W, H).s, L = levelLayout(W, H);
-    ctx.fillStyle = 'rgba(30,14,4,0.55)'; ctx.fillRect(0, 0, W, H);
-    const y0 = L.buttons[0].y;
-    label('火候', W / 2, y0 - 66 * s, Math.min(38 * s, W / 8), '#ffe27a', 'center');
-
-    const cols = ['#ffb04a', '#ff7a2e', '#e8402a'];
-    for (const b of L.buttons) {
-      const i = b.idx, h = HEATS[i], locked = !G.isUnlocked(i), cleared = G.cleared.has(i), sel = G.sel === i;
-      const appear = clamp(((G.selT || 0) - i * 0.08) / 0.22, 0, 1), ease = 1 - Math.pow(1 - appear, 3);
-      const shake = G.lockShake > 0 && G.lockIdx === i ? Math.sin(G.real * 60) * 6 * G.lockShake : 0;
-      const hv = hovered(b) && !locked;
-      ctx.save(); ctx.globalAlpha = appear;
-      ctx.translate(b.x + b.w / 2 + shake, b.y + b.h / 2 + (1 - ease) * 40); if (hv) ctx.scale(1.04, 1.04); ctx.translate(-b.w / 2, -b.h / 2);
-      card(b, locked ? '#9a8a78' : cols[i], hv || sel);
-      const vert = !L.portrait;
-      const cx = vert ? b.w / 2 : 70, cy = vert ? b.h * 0.27 : b.h / 2;
-      // 火苗
-      const fr = vert ? Math.min(b.w * 0.16, 34) : Math.min(b.h * 0.26, 30);
-      for (let f = 0; f <= i; f++) {
-        const fx = cx + (f - i / 2) * fr * 0.9, fy = cy + Math.sin(G.real * 6 + f) * 2, fs = fr * (0.8 + 0.2 * Math.sin(G.real * 9 + f * 2));
-        ctx.fillStyle = locked ? '#b8a894' : cols[i]; ctx.strokeStyle = INK; ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.moveTo(fx, fy - fs); ctx.quadraticCurveTo(fx + fs * 0.7, fy - fs * 0.1, fx + fs * 0.4, fy + fs * 0.45); ctx.quadraticCurveTo(fx, fy + fs * 0.7, fx - fs * 0.4, fy + fs * 0.45); ctx.quadraticCurveTo(fx - fs * 0.7, fy - fs * 0.1, fx, fy - fs); ctx.stroke(); ctx.fill();
-        ctx.fillStyle = locked ? '#d8ccbc' : '#fff3c0'; ctx.beginPath(); ctx.ellipse(fx, fy + fs * 0.15, fs * 0.2, fs * 0.3, 0, 0, TAU); ctx.fill();
+    const G = Game, L = levelLayout(W, H);
+    ctx.fillStyle = 'rgba(30,14,4,0.7)'; ctx.fillRect(0, 0, W, H);
+    cachedLabel('吃大米饭', L.x + 2, L.top + L.header / 2, Math.min(36 * L.s, L.w * 0.105), '#ffe8a5', 'left', true);
+    if (G.checkpoint) button(L.resume, '继续', '#b47e43', Math.min(19 * L.s, L.resume.h * 0.48));
+    const colors = ['#e4a04b', '#eb823c', '#df5243'];
+    for (const b of L.heats) {
+      const locked = !G.isUnlocked(b.idx), selected = G.sel === b.idx;
+      const shake = G.lockShake > 0 && G.lockIdx === b.idx ? Math.sin(G.real * 60) * 5 * G.lockShake : 0;
+      ctx.save(); ctx.translate(shake, 0);
+      ctx.fillStyle = selected ? colors[b.idx] : 'rgba(255,238,200,0.08)';
+      rrect(b.x, b.y, b.w, b.h, 12); ctx.fill();
+      ctx.strokeStyle = selected ? '#ffe9b9' : 'rgba(255,238,200,0.24)'; ctx.lineWidth = selected ? 2 : 1; ctx.stroke();
+      cachedLabel(HEATS[b.idx].name, b.x + b.w / 2 - (locked ? 7 : 0), b.y + b.h / 2, Math.min(18 * L.s, b.h * 0.5), locked ? '#aa9983' : '#fff4d8', 'center', false);
+      if (locked) {
+        const x = b.x + b.w / 2 + 19, y = b.y + b.h / 2;
+        ctx.fillStyle = '#aa9983'; rrect(x - 4, y - 1, 9, 7, 2); ctx.fill();
+        ctx.strokeStyle = '#aa9983'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x + 0.5, y - 1, 3, Math.PI, 0); ctx.stroke();
       }
-      const tx = vert ? b.w / 2 : 140, al = vert ? 'center' : 'left';
-      const ty = vert ? b.h * 0.52 : b.h * 0.3;
-      label(h.name, tx, ty, Math.min(30, b.w / 5), locked ? '#9a8a78' : '#4a2a10', al, false);
-      ctx.font = `700 ${Math.min(13, b.w / 16)}px ${BODY}`; ctx.fillStyle = '#7a5a3a'; ctx.textAlign = al; ctx.textBaseline = 'middle';
-
-      const sub = locked ? '未解锁' : cleared ? (G.best[i] ? `最快 ${fmt(G.best[i])}` : '已吃完') : '还没吃完过';
-      label(sub, tx, ty + (vert ? 56 : 50), Math.min(13, b.w / 16), locked ? '#b0a090' : cleared ? '#2e9b57' : '#c06a10', al, false, BODY);
-      if (cleared) { ctx.fillStyle = '#3fc27a'; ctx.beginPath(); ctx.arc(b.w - 18, 18, 10, 0, TAU); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(b.w - 23, 18); ctx.lineTo(b.w - 19, 22); ctx.lineTo(b.w - 12, 13); ctx.stroke(); }
-      if (locked) { const lx = 22, ly = 22; ctx.fillStyle = INK; rrect(lx - 9, ly - 3, 18, 14, 3); ctx.fill(); ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(lx, ly - 3, 6, Math.PI, 0); ctx.stroke(); }
-      if (sel && !locked) { ctx.strokeStyle = `rgba(255,255,255,${0.6 + 0.4 * Math.sin(G.real * 6)})`; ctx.lineWidth = 3; rrect(8, 8, b.w - 16, b.h - 16, 12); ctx.stroke(); }
-      if (!touchUI() && !locked) label(String(i + 1), 18, b.h - 18, 13, '#c9b48e', 'center', false, BODY);
       ctx.restore();
+    }
+    for (const b of L.buttons) {
+      paintLevelCard(b);
+      if (G.selPot === b.idx || hovered(b)) {
+        ctx.strokeStyle = POTS[b.idx].look.accent; ctx.lineWidth = 2;
+        rrect(b.x - 2, b.y - 2, b.w + 4, b.h + 4, 20); ctx.stroke();
+      }
     }
   }
   return { init, resize, draw, clearCache, cacheMetrics };
